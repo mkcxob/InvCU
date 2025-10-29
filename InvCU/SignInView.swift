@@ -2,106 +2,135 @@
 //  SignInView.swift
 //  Marketing Inventory
 //
-//  Created by work on 10/21/25.
+//  Created by Amy on 10/21/25.
 //
 
 import SwiftUI
+import Supabase
 
 struct SignInView: View {
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var showPassword: Bool = false
     @State private var isSubmitting: Bool = false
-    
+    @State private var isSignedIn: Bool = false
+    @State private var errorMessage: String?
+
     var body: some View {
-        ZStack {
-            // Page background
-            Color(.systemGroupedBackground)
-            
-            VStack(spacing: 0) {
-                HeaderCard()
+        NavigationStack {
+            ZStack {
+                Color(.systemGroupedBackground)
+                    .ignoresSafeArea()
                 
-                VStack(spacing: 16) {
-                    // Email field
-                    LabeledField(
-                        systemIcon: "envelope",
-                        placeholder: "email@carolinau.edu",
-                        text: $email,
-                        isSecure: false
-                    )
+                VStack(spacing: 0) {
+                    HeaderCard()
                     
-                    // Password field with show/hide eye
-                    ZStack {
-                        if showPassword {
-                            LabeledField(
-                                systemIcon: "lock",
-                                placeholder: "Password",
-                                text: $password,
-                                isSecure: false
-                            )
-                        } else {
-                            LabeledField(
-                                systemIcon: "lock",
-                                placeholder: "Password",
-                                text: $password,
-                                isSecure: true
-                            )
+                    VStack(spacing: 16) {
+                        // Email field
+                        LabeledField(
+                            systemIcon: "envelope",
+                            placeholder: "email@carolinau.edu",
+                            text: $email,
+                            isSecure: false
+                        )
+                        
+                        // Password field with show/hide toggle
+                        ZStack {
+                            if showPassword {
+                                LabeledField(
+                                    systemIcon: "lock",
+                                    placeholder: "Password",
+                                    text: $password,
+                                    isSecure: false
+                                )
+                            } else {
+                                LabeledField(
+                                    systemIcon: "lock",
+                                    placeholder: "Password",
+                                    text: $password,
+                                    isSecure: true
+                                )
+                            }
+                            
+                            HStack {
+                                Spacer()
+                                Button {
+                                    withAnimation { showPassword.toggle() }
+                                } label: {
+                                    Image(systemName: showPassword ? "eye" : "eye.slash")
+                                        .foregroundStyle(.gray.opacity(0.7))
+                                        .padding(.trailing, 16)
+                                }
+                                .accessibilityLabel(showPassword ? "Hide password" : "Show password")
+                            }
                         }
                         
-                        HStack {
-                            Spacer()
-                            Button {
-                                withAnimation { showPassword.toggle() }
-                            } label: {
-                                Image(systemName: showPassword ? "eye" : "eye.slash")
-                                    .foregroundStyle(.gray.opacity(0.7))
-                                    .padding(.trailing, 16)
+                        // Error message
+                        if let errorMessage = errorMessage {
+                            Text(errorMessage)
+                                .foregroundColor(.red)
+                                .font(.system(size: 14))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        
+                        // Continue button
+                        Button {
+                            Task {
+                                await signIn()
                             }
-                            .accessibilityLabel(showPassword ? "Hide password" : "Show password")
+                        } label: {
+                            Text(isSubmitting ? "Signing in…" : "Continue")
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(email.isEmpty || password.isEmpty || isSubmitting)
+                        .opacity((email.isEmpty || password.isEmpty) ? 0.7 : 1)
+                        
+                      
+                        .navigationDestination(isPresented: $isSignedIn) {
+                            Learn()
                         }
                     }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 20)
                     
-                    // Continue button
-                    Button {
-                        // TODO: Hook up your sign-in action
-                        isSubmitting = true
-                        // Simulate work
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                            isSubmitting = false
-                        }
-                    } label: {
-                        Text(isSubmitting ? "Signing in…" : "Continue")
-                            .font(.system(size: 16, weight: .semibold))
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .disabled(email.isEmpty || password.isEmpty || isSubmitting)
-                    .opacity((email.isEmpty || password.isEmpty) ? 0.7 : 1)
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 20)
-                
-                Spacer(minLength: 0)
             }
         }
     }
+    
+    // MARK: - Sign in function
+    func signIn() async {
+        isSubmitting = true
+        errorMessage = nil
+        defer { isSubmitting = false }
+        
+        do {
+            _ = try await supabase.auth.signIn(email: email, password: password)
+            isSignedIn = true
+        } catch {
+            errorMessage = "Login failed: \(error.localizedDescription)"
+        }
+    }
 }
-//MARK: Marketing Card
+
+// MARK: - Header Card
 private struct HeaderCard: View {
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            
             Rectangle()
                 .fill(Color.brandNavy)
                 .frame(height: 220)
                 .ignoresSafeArea(edges: .top)
+            
             RoundedCorner(radius: 16, corners: [.bottomLeft, .bottomRight])
                 .fill(Color.brandNavy)
                 .shadow(color: .black.opacity(0.15), radius: 6, y: 4)
                 .frame(height: 220)
             
-            VStack(alignment: .leading, spacing: 6) {
-                // Logo
+            VStack(alignment: .center, spacing: 6) {
                 HStack {
                     Spacer()
                     Image(.image)
@@ -146,6 +175,7 @@ private struct LabeledField: View {
         HStack(spacing: 10) {
             Image(systemName: systemIcon)
                 .foregroundStyle(.gray.opacity(0.7))
+            
             Group {
                 if isSecure {
                     SecureField(placeholder, text: $text)
@@ -202,19 +232,13 @@ private struct RoundedCorner: Shape {
 
 // MARK: - Brand Color
 extension Color {
-    static let brandNavy = Color(red: 0/255, green: 41/255, blue: 105/255) // close to your screenshot
+    static let brandNavy = Color(red: 0/255, green: 41/255, blue: 105/255)
 }
 
-// Preview
+// MARK: - Preview
 struct SignInView_Previews: PreviewProvider {
     static var previews: some View {
-        Group {
-            SignInView()
-                .previewDisplayName("Light")
-            
-            SignInView()
-                .preferredColorScheme(.dark)
-                .previewDisplayName("Dark")
-        }
+        SignInView()
     }
 }
+
