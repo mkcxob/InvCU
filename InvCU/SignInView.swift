@@ -9,94 +9,87 @@ import SwiftUI
 import Supabase
 
 struct SignInView: View {
+    @Binding var isAuthenticated: Bool
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var showPassword: Bool = false
     @State private var isSubmitting: Bool = false
-    @State private var isSignedIn: Bool = false
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(.systemGroupedBackground)
-                    .ignoresSafeArea()
+        ZStack {
+            Color(.systemGroupedBackground)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                HeaderCard()
                 
-                VStack(spacing: 0) {
-                    HeaderCard()
+                VStack(spacing: 16) {
+                    // Email field
+                    LabeledField(
+                        systemIcon: "envelope",
+                        placeholder: "email@carolinau.edu",
+                        text: $email,
+                        isSecure: false
+                    )
                     
-                    VStack(spacing: 16) {
-                        // Email field
-                        LabeledField(
-                            systemIcon: "envelope",
-                            placeholder: "email@carolinau.edu",
-                            text: $email,
-                            isSecure: false
-                        )
-                        
-                        // Password field with show/hide toggle
-                        ZStack {
-                            if showPassword {
-                                LabeledField(
-                                    systemIcon: "lock",
-                                    placeholder: "Password",
-                                    text: $password,
-                                    isSecure: false
-                                )
-                            } else {
-                                LabeledField(
-                                    systemIcon: "lock",
-                                    placeholder: "Password",
-                                    text: $password,
-                                    isSecure: true
-                                )
-                            }
-                            
-                            HStack {
-                                Spacer()
-                                Button {
-                                    withAnimation { showPassword.toggle() }
-                                } label: {
-                                    Image(systemName: showPassword ? "eye" : "eye.slash")
-                                        .foregroundStyle(.gray.opacity(0.7))
-                                        .padding(.trailing, 16)
-                                }
-                                .accessibilityLabel(showPassword ? "Hide password" : "Show password")
-                            }
+                    // Password field with show/hide toggle
+                    ZStack {
+                        if showPassword {
+                            LabeledField(
+                                systemIcon: "lock",
+                                placeholder: "Password",
+                                text: $password,
+                                isSecure: false
+                            )
+                        } else {
+                            LabeledField(
+                                systemIcon: "lock",
+                                placeholder: "Password",
+                                text: $password,
+                                isSecure: true
+                            )
                         }
                         
-                        // Error message
-                        if let errorMessage = errorMessage {
-                            Text(errorMessage)
-                                .foregroundColor(.red)
-                                .font(.system(size: 14))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        
-                        // Continue button
-                        Button {
-                            Task {
-                                await signIn()
+                        HStack {
+                            Spacer()
+                            Button {
+                                withAnimation { showPassword.toggle() }
+                            } label: {
+                                Image(systemName: showPassword ? "eye" : "eye.slash")
+                                    .foregroundStyle(.gray.opacity(0.7))
+                                    .padding(.trailing, 16)
                             }
-                        } label: {
-                            Text(isSubmitting ? "Signing in…" : "Continue")
-                                .font(.system(size: 16, weight: .semibold))
-                                .frame(maxWidth: .infinity, minHeight: 48)
-                        }
-                        .buttonStyle(PrimaryButtonStyle())
-                        .disabled(email.isEmpty || password.isEmpty || isSubmitting)
-                        .opacity((email.isEmpty || password.isEmpty) ? 0.7 : 1)
-                        
-                      
-                        .navigationDestination(isPresented: $isSignedIn) {
-                            Learn()
+                            .accessibilityLabel(showPassword ? "Hide password" : "Show password")
                         }
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 20)
                     
-                    Spacer(minLength: 0)
+                    // Error message
+                    if let errorMessage = errorMessage {
+                        Text(errorMessage)
+                            .foregroundColor(.red)
+                            .font(.system(size: 14))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    
+                    // Continue button
+                    Button {
+                        Task {
+                            await signIn()
+                        }
+                    } label: {
+                        Text(isSubmitting ? "Signing in…" : "Continue")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(email.isEmpty || password.isEmpty || isSubmitting)
+                    .opacity((email.isEmpty || password.isEmpty) ? 0.7 : 1)
                 }
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+                
+                Spacer(minLength: 0)
             }
         }
     }
@@ -109,9 +102,13 @@ struct SignInView: View {
         
         do {
             _ = try await supabase.auth.signIn(email: email, password: password)
-            isSignedIn = true
+            // Successfully signed in
+            withAnimation {
+                isAuthenticated = true
+            }
         } catch {
             errorMessage = "Login failed: \(error.localizedDescription)"
+            print("Debug error: \(error)")
         }
     }
 }
@@ -238,7 +235,6 @@ extension Color {
 // MARK: - Preview
 struct SignInView_Previews: PreviewProvider {
     static var previews: some View {
-        SignInView()
+        SignInView(isAuthenticated: .constant(false))
     }
 }
-

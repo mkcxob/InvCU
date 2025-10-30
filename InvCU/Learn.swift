@@ -3,25 +3,28 @@ import SwiftUI
 struct Learn: View {
     var body: some View {
         TabView {
-            Text("Home")
+            DashboardView()
                 .tabItem {
-                    Label("Home", systemImage: "house")
+                    Image(systemName: "house")
+                    Text("Dashboard")
                 }
-            Text("Home")
+            
+            Text("Marketing Inventory")
                 .tabItem {
-                    Label("Home", systemImage: "house")
+                    Image(systemName: "shippingbox")
+                    Text("Inventory")
                 }
-            Text("Home")
+            
+            Text("Search")
                 .tabItem {
-                    Label("Home", systemImage: "house")
+                    Image(systemName: "magnifyingglass")
+                    Text("Search")
                 }
-            Text("Home")
+            
+            Text("Notifications")
                 .tabItem {
-                    Label("Home", systemImage: "house")
-                }
-            Text("Home")
-                .tabItem {
-                    Label("Home", systemImage: "house")
+                    Image(systemName: "bell.fill")
+                    Text("Notifications")
                 }
         }
     }
@@ -30,3 +33,4 @@ struct Learn: View {
 #Preview {
     Learn()
 }
+
