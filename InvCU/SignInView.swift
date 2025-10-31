@@ -15,17 +15,18 @@ struct SignInView: View {
     @State private var showPassword: Bool = false
     @State private var isSubmitting: Bool = false
     @State private var errorMessage: String?
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack {
-            Color(.systemGroupedBackground)
+            Color(.systemBackground)
                 .ignoresSafeArea()
             
             VStack(spacing: 0) {
                 HeaderCard()
                 
                 VStack(spacing: 16) {
-                    // Email field
+                    // Email fields
                     LabeledField(
                         systemIcon: "envelope",
                         placeholder: "email@carolinau.edu",
@@ -57,7 +58,7 @@ struct SignInView: View {
                                 withAnimation { showPassword.toggle() }
                             } label: {
                                 Image(systemName: showPassword ? "eye" : "eye.slash")
-                                    .foregroundStyle(.gray.opacity(0.7))
+                                    .foregroundStyle(Color(.systemGray))
                                     .padding(.trailing, 16)
                             }
                             .accessibilityLabel(showPassword ? "Hide password" : "Show password")
@@ -92,6 +93,7 @@ struct SignInView: View {
                 Spacer(minLength: 0)
             }
         }
+        .preferredColorScheme(nil) // Allow system to control
     }
     
     // MARK: - Sign in function
@@ -115,6 +117,8 @@ struct SignInView: View {
 
 // MARK: - Header Card
 private struct HeaderCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+    
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             Rectangle()
@@ -163,6 +167,7 @@ private struct HeaderCard: View {
 
 // MARK: - Reusable Field
 private struct LabeledField: View {
+    @Environment(\.colorScheme) private var colorScheme
     let systemIcon: String
     let placeholder: String
     @Binding var text: String
@@ -171,7 +176,7 @@ private struct LabeledField: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: systemIcon)
-                .foregroundStyle(.gray.opacity(0.7))
+                .foregroundStyle(Color(.systemGray))
             
             Group {
                 if isSecure {
@@ -185,18 +190,18 @@ private struct LabeledField: View {
                         .keyboardType(.emailAddress)
                 }
             }
+            .foregroundColor(Color(.label))
         }
         .font(.system(size: 16))
         .padding(.horizontal, 16)
         .frame(height: 44)
         .frame(maxWidth: .infinity)
-        .background(.white)
+        .background(Color(.secondarySystemBackground))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color(.systemGray4), lineWidth: 1)
+                .stroke(Color(.separator), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .shadow(color: .black.opacity(0.03), radius: 1, y: 1)
     }
 }
 
@@ -229,12 +234,16 @@ private struct RoundedCorner: Shape {
 
 // MARK: - Brand Color
 extension Color {
-    static let brandNavy = Color(red: 0/255, green: 41/255, blue: 105/255)
+    static let brandNavy = Color(red: 0/255, green: 40/255, blue: 104/255)
 }
 
 // MARK: - Preview
-struct SignInView_Previews: PreviewProvider {
-    static var previews: some View {
-        SignInView(isAuthenticated: .constant(false))
-    }
+#Preview("Light Mode") {
+    SignInView(isAuthenticated: .constant(false))
+        .environment(\.colorScheme, .light)
+}
+
+#Preview("Dark Mode") {
+    SignInView(isAuthenticated: .constant(false))
+        .environment(\.colorScheme, .dark)
 }

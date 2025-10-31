@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Supabase // make sure you have your Supabase client imported
 
 // MARK: - Models (sample)
 struct Stat: Identifiable {
@@ -61,21 +62,103 @@ struct DashboardView: View {
         LowStockItem(name: "Blue Backpack", imageName: "backpack", remaining: 5)
     ]
     
+    // Layout constants
+    private let contentMaxWidth: CGFloat = 820
+    private let cardCornerRadius: CGFloat = 12
+    private let standardCardPadding: CGFloat = 16
+    
+    @Environment(\.colorScheme) private var colorScheme
+    
+    // MARK: - User name state
+    @State private var userName: String = "User" // default fallback
+    
     var body: some View {
         NavigationView {
             ScrollView {
-                VStack(spacing: 18) {
-                    header
-                    statsCard
-                    quickAccessGrid
-                    recentActivityCard
-                    lowStockCard
-                    Spacer(minLength: 40)
+                VStack {
+                    VStack(alignment: .leading, spacing: 18) {
+                        header
+                        statsCard
+                        quickAccessGrid
+                        recentActivityCard
+                        lowStockCard
+                        Spacer(minLength: 36)
+                    }
+                    .frame(maxWidth: contentMaxWidth)
+                    .padding(.vertical, 16)
+                    .padding(.horizontal, 16)
                 }
-                .padding()
+                .frame(maxWidth: .infinity)
+                .background(Color(UIColor.systemBackground))
             }
-           
+            .navigationBarHidden(true)
+            .task {
+                // Initial fetch if already signed in
+                await fetchUserName()
+            }
+            .task {
+                // React to auth state changes (sign-in, token refresh) and refetch
+                for await (event, _) in supabase.auth.authStateChanges {
+                    if event == .signedIn || event == .tokenRefreshed || event == .initialSession {
+                        await fetchUserName()
+                    }
+                    if event == .signedOut {
+                        await MainActor.run { userName = "User" }
+                    }
+                }
+            }
         }
+    }
+    
+    // MARK: - Fetch user name from Supabase
+    private struct ProfileRow: Decodable {
+        // Match the JSON exactly
+        let full_name: String?
+    }
+
+    private func fetchUserName() async {
+        do {
+            // Fetch session; this throws if there is no session.
+            let session = try await supabase.auth.session
+            let userId = session.user.id
+
+            // Execute the query
+            let response = try await supabase
+                .from("profiles")
+                .select("full_name")
+                .eq("id", value: userId)
+                .single()
+                .execute()
+            
+            // Diagnostics
+            if let bodyString = String(data: response.data, encoding: .utf8) {
+                print("profiles response (\(response.status)): \(bodyString)")
+            } else {
+                print("profiles response (\(response.status)): <non-utf8 data>")
+            }
+            
+            // Decode with JSONDecoder (no special strategy needed)
+            let row = try JSONDecoder().decode(ProfileRow.self, from: response.data)
+            
+            if let name = row.full_name, !name.isEmpty {
+                await MainActor.run { self.userName = name }
+            } else {
+                print("full_name not found or empty in response")
+            }
+        } catch {
+            // No session or other error; keep default "User"
+            print("Failed to fetch user name: \(error)")
+        }
+    }
+
+    // MARK: - Reusable Section Title
+    @ViewBuilder
+    private func SectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.headline)
+            .fontWeight(.semibold)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, 0)
     }
     
     // MARK: - Header
@@ -83,61 +166,58 @@ struct DashboardView: View {
         HStack(alignment: .center, spacing: 12) {
             Image(.image)
                 .resizable()
+                .scaledToFill()
                 .frame(width: 52, height: 52)
-                .foregroundColor(.yellow)
-                .background(Circle().fill(Color.white))
-                .shadow(radius: 2)
+                .foregroundColor(.white)
+                .background(Circle().fill(Color(UIColor.systemBlue)))
+                .clipShape(Circle())
+                .shadow(color: shadowColor, radius: 2, x: 0, y: 2)
             
-            VStack(alignment: .leading) {
-                Text("Welcome back, User!")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Welcome back, \(userName)!")
                     .font(.title2)
                     .fontWeight(.bold)
                 Text("Here's your quick overview")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color(UIColor.secondaryLabel))
             }
             Spacer()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal)
     }
     
-    // MARK: - Stats Card (Single White Card)
+    // MARK: - Stats Card (Single Card)
     private var statsCard: some View {
-        VStack(spacing: 16) {
-            // Card Title
-            Text("Quick Overview")
-                .font(.headline)
-                .padding(.top, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
+        VStack(spacing: 14) {
+            SectionTitle("Quick Overview")
             
-            // Stats Row
             HStack(spacing: 12) {
                 ForEach(stats) { s in
-                    VStack {
+                    VStack(spacing: 6) {
                         Text(s.value)
                             .font(.title2)
                             .fontWeight(.bold)
-                            .foregroundColor(.primary)
+                            .foregroundColor(Color(UIColor.label))
                         Text(s.title)
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color(UIColor.secondaryLabel))
                     }
                     .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.vertical, 12)
         }
-        .padding()
-        .background(Color.white)
-        .cornerRadius(16)
-        .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 6)
+        .padding(standardCardPadding)
+        .background(cardBackground)
+        .cornerRadius(cardCornerRadius)
+        .shadow(color: shadowColor, radius: 6, x: 0, y: 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     
     // MARK: - Quick Access Grid
     private var quickAccessGrid: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Quick Access")
-                .font(.headline)
+            SectionTitle("Quick Access")
             
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 ForEach(actions) { a in
@@ -145,7 +225,7 @@ struct DashboardView: View {
                         VStack(spacing: 10) {
                             ZStack {
                                 Circle()
-                                    .fill(Color(red: 0/255, green: 40/255, blue: 104/255))
+                                    .fill(Color.brandNavy)
                                     .frame(width: 52, height: 52)
                                 Image(systemName: a.systemIcon)
                                     .font(.title2)
@@ -153,114 +233,125 @@ struct DashboardView: View {
                             }
                             Text(a.title)
                                 .font(.subheadline)
-                                .foregroundColor(.primary)
+                                .fontWeight(.regular)
+                                .foregroundColor(Color(UIColor.label))
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
                         }
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color(.systemBackground))
-                        .cornerRadius(12)
-                        .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 4)
+                        .frame(maxWidth: .infinity, minHeight: 110)
+                        .padding(.vertical, 6)
+                        .background(cardBackground)
+                        .cornerRadius(10)
+                        .shadow(color: shadowColor, radius: 4, x: 0, y: 3)
                     }
                 }
             }
         }
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     
     // MARK: - Recent Activity Card
     private var recentActivityCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Recent Activity")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 0) {
+            SectionTitle("Recent Activity")
+                .padding(.bottom, 6)
             
-            ForEach(activities) { act in
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "clock")
-                        .foregroundColor(.secondary)
-                        .padding(.top, 2)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(act.date)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(act.text)
-                            .font(.subheadline)
+            VStack(spacing: 0) {
+                ForEach(Array(activities.enumerated()), id: \.element.id) { index, act in
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "clock")
+                            .foregroundColor(Color(UIColor.secondaryLabel))
+                            .padding(.top, 2)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(act.date)
+                                .font(.caption)
+                                .foregroundColor(Color(UIColor.secondaryLabel))
+                            Text(act.text)
+                                .font(.subheadline)
+                                .foregroundColor(Color(UIColor.label))
+                        }
+                        Spacer()
                     }
-                    Spacer()
+                    .padding(.vertical, 12)
+                    
+                    if index != activities.count - 1 {
+                        Divider()
+                            .padding(.leading, 36)
+                    }
                 }
-                .padding(.vertical, 6)
-                Divider()
             }
+            .padding(.horizontal, 2)
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 4)
+        .padding(standardCardPadding)
+        .background(cardBackground)
+        .cornerRadius(cardCornerRadius)
+        .shadow(color: shadowColor, radius: 6, x: 0, y: 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     
     // MARK: - Low Stock Card
     private var lowStockCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Low Stock Items")
-                .font(.headline)
+            SectionTitle("Low Stock Items")
             
             HStack(spacing: 12) {
                 ForEach(lowStock) { item in
                     VStack(spacing: 8) {
                         Image(systemName: "photo")
                             .resizable()
+                            .scaledToFit()
                             .frame(width: 70, height: 70)
-                            .background(Color(.systemGray6))
+                            .background(Color(UIColor.systemGray6))
                             .cornerRadius(8)
                         
                         Text(item.name)
                             .font(.subheadline)
                             .multilineTextAlignment(.center)
+                            .foregroundColor(Color(UIColor.label))
                         
                         Text("\(item.remaining) Left in Stock")
                             .font(.caption)
-                            .foregroundColor(.red)
+                            .foregroundColor(Color(UIColor.systemRed))
                     }
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color(.systemBackground))
+                    .background(cardBackground)
                     .cornerRadius(10)
-                    .shadow(color: Color.black.opacity(0.04), radius: 4, x: 0, y: 3)
+                    .shadow(color: shadowColor.opacity(0.6), radius: 4, x: 0, y: 3)
                 }
             }
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 4)
+        .padding(standardCardPadding)
+        .background(cardBackground)
+        .cornerRadius(cardCornerRadius)
+        .shadow(color: shadowColor, radius: 6, x: 0, y: 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
-}
-
-// MARK: - Color Hex Extension
-extension Color {
-    init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let r, g, b: UInt64
-        if hex.count == 6 {
-            r = (int >> 16) & 0xFF
-            g = (int >> 8) & 0xFF
-            b = int & 0xFF
-        } else {
-            r = 0; g = 0; b = 0
-        }
-        self.init(
-            red: Double(r) / 255,
-            green: Double(g) / 255,
-            blue: Double(b) / 255
-        )
+    
+    // MARK: - Dynamic colors & helpers
+    private var cardBackground: Color {
+        Color(UIColor.secondarySystemBackground)
+    }
+    
+    private var shadowColor: Color {
+        colorScheme == .dark ? Color.black.opacity(0.45) : Color.black.opacity(0.06)
     }
 }
 
 // MARK: - Preview
 struct DashboardView_Previews: PreviewProvider {
     static var previews: some View {
-        DashboardView()
-            .preferredColorScheme(.light)
+        Group {
+            DashboardView()
+                .previewDisplayName("Light")
+                .preferredColorScheme(.light)
+            
+            DashboardView()
+                .previewDisplayName("Dark iPad")
+                .preferredColorScheme(.dark)
+                .previewDevice("iPad (11-inch) (4th generation)")
+        }
     }
 }
-
