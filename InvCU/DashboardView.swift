@@ -13,7 +13,7 @@ struct Stat: Identifiable {
     let id = UUID()
     let title: String
     let value: String
-}
+} 
 
 struct QuickAction: Identifiable {
     let id = UUID()

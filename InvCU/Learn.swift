@@ -6,25 +6,25 @@ struct Learn: View {
             DashboardView()
                 .tabItem {
                     Image(systemName: "house")
-                    Text("Dashboard")
+                    Text("")
                 }
             
-            Text("Marketing Inventory")
+            InventoryView()
                 .tabItem {
-                    Image(systemName: "shippingbox")
-                    Text("Inventory")
+                    Image(systemName: "shippingbox.fill")
+                    Text("")
                 }
             
             Text("Search")
                 .tabItem {
                     Image(systemName: "magnifyingglass")
-                    Text("Search")
+                    Text("")
                 }
             
             Text("Notifications")
                 .tabItem {
                     Image(systemName: "bell.fill")
-                    Text("Notifications")
+                    Text("")
                 }
         }
     }
@@ -33,4 +33,3 @@ struct Learn: View {
 #Preview {
     Learn()
 }
-
