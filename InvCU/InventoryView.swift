@@ -11,133 +11,47 @@ import Storage
 import Supabase
 
 // MARK: - Models
-struct InventoryItem: Identifiable {
-    let id = UUID()
-    let name: String
-    let quantity: Int
-    let category: String
-    let imageName: String   // For icons: SF Symbol name. For photos: public URL string.
-    let itemId: String
-    let notes: String?
-    let history: [HistoryEntry]
+struct InventoryItem: Identifiable, Equatable {
+    let id: UUID
+    var name: String
+    var quantity: Int
+    var category: String
+    var imageName: String   // For photos: public URL string.
+    var itemId: String
+    var notes: String?
+    var history: [HistoryEntry]
     var isBookmarked: Bool = false
+    
+    static func == (lhs: InventoryItem, rhs: InventoryItem) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
-struct HistoryEntry: Identifiable {
-    let id = UUID()
-    let label: String
-    let value: String
+struct HistoryEntry: Identifiable, Equatable {
+    let id: UUID
+    var label: String
+    var value: String
+    
+    static func == (lhs: HistoryEntry, rhs: HistoryEntry) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
 // MARK: - InventoryView
 struct InventoryView: View {
+    @StateObject private var supabaseManager = SupabaseManager.shared
+    
     @State private var selectedCategory = "Merchandise"
     @State private var searchText = ""
     @State private var selectedItem: InventoryItem?
     @State private var showingDetail = false
     @State private var showingAddItem = false
-    @State private var bookmarkedItems: Set<UUID> = []
+    
+    @State private var inventoryItems: [InventoryItem] = []
+    @State private var isLoading = false
+    @State private var loadError: String?
     
     let categories = ["Merchandise", "Decorations", "Banners"]
-    
-    // Sample inventory data
-    @State private var inventoryItems = [
-        InventoryItem(
-            name: "Gray Crewneck",
-            quantity: 200,
-            category: "Merchandise",
-            imageName: "tshirt",
-            itemId: "MERC-001",
-            notes: nil,
-            history: [
-                HistoryEntry(label: "Date Received", value: "September 15, 2025"),
-                HistoryEntry(label: "Logged By", value: "Amy Portillo"),
-                HistoryEntry(label: "Last Updated", value: "October 15, 2025, 1:50 PM")
-            ]
-        ),
-        InventoryItem(
-            name: "Blue Mug",
-            quantity: 40,
-            category: "Merchandise",
-            imageName: "mug",
-            itemId: "MERC-002",
-            notes: nil,
-            history: [
-                HistoryEntry(label: "Date Received", value: "August 10, 2025"),
-                HistoryEntry(label: "Logged By", value: "John Smith"),
-                HistoryEntry(label: "Last Updated", value: "October 15, 2025, 3:49 PM")
-            ]
-        ),
-        InventoryItem(
-            name: "Black Hoodie",
-            quantity: 500,
-            category: "Merchandise",
-            imageName: "hoodie",
-            itemId: "MERC-003",
-            notes: "Delivered to Jared for Marketing Event #12",
-            history: [
-                HistoryEntry(label: "Date Received", value: "September 25, 2025"),
-                HistoryEntry(label: "Logged By", value: "Amy Portillo"),
-                HistoryEntry(label: "Given To", value: "Jared Eldridge"),
-                HistoryEntry(label: "Date Given", value: "October 17, 2025"),
-                HistoryEntry(label: "Time Given", value: "10:32 AM"),
-                HistoryEntry(label: "Last Updated", value: "October 17, 2025, 10:32 AM")
-            ],
-            isBookmarked: true
-        ),
-        InventoryItem(
-            name: "Gray Beanie",
-            quantity: 100,
-            category: "Merchandise",
-            imageName: "beanie",
-            itemId: "MERC-004",
-            notes: nil,
-            history: [
-                HistoryEntry(label: "Date Received", value: "October 1, 2025"),
-                HistoryEntry(label: "Logged By", value: "Sarah Johnson"),
-                HistoryEntry(label: "Last Updated", value: "October 10, 2025, 2:15 PM")
-            ]
-        ),
-        InventoryItem(
-            name: "Blue Backpack",
-            quantity: 25,
-            category: "Merchandise",
-            imageName: "backpack",
-            itemId: "MERC-005",
-            notes: nil,
-            history: [
-                HistoryEntry(label: "Date Received", value: "September 5, 2025"),
-                HistoryEntry(label: "Logged By", value: "Amy Portillo"),
-                HistoryEntry(label: "Last Updated", value: "October 5, 2025, 9:20 AM")
-            ]
-        ),
-        InventoryItem(
-            name: "Banner Stand",
-            quantity: 15,
-            category: "Banners",
-            imageName: "flag",
-            itemId: "BANN-001",
-            notes: nil,
-            history: [
-                HistoryEntry(label: "Date Received", value: "July 12, 2025"),
-                HistoryEntry(label: "Logged By", value: "Mike Davis"),
-                HistoryEntry(label: "Last Updated", value: "September 20, 2025, 11:45 AM")
-            ]
-        ),
-        InventoryItem(
-            name: "Table Runner",
-            quantity: 30,
-            category: "Decorations",
-            imageName: "tablecloth",
-            itemId: "DECO-001",
-            notes: nil,
-            history: [
-                HistoryEntry(label: "Date Received", value: "August 20, 2025"),
-                HistoryEntry(label: "Logged By", value: "Emily Brown"),
-                HistoryEntry(label: "Last Updated", value: "October 1, 2025, 3:30 PM")
-            ]
-        )
-    ]
     
     var filteredItems: [InventoryItem] {
         inventoryItems.filter { item in
@@ -149,7 +63,6 @@ struct InventoryView: View {
     
     @Environment(\.colorScheme) private var colorScheme
     
-    // Match DashboardView’s adaptive shadow color
     private var shadowColor: Color {
         colorScheme == .dark ? Color.black.opacity(0.45) : Color.black.opacity(0.06)
     }
@@ -160,23 +73,50 @@ struct InventoryView: View {
                 Color(UIColor.systemBackground)
                     .ignoresSafeArea()
                 
-                VStack(spacing: 0) {
-                    // Header
-                    header
-                    
-                    ScrollView {
-                        VStack(spacing: 16) {
-                            // Category Filter
-                            categoryFilter
-                            
-                            // Search Bar
-                            searchBar
-                            
-                            // Inventory Cards
-                            inventoryCards
+                if isLoading {
+                    VStack {
+                        ProgressView()
+                        Text("Loading inventory...")
+                            .foregroundColor(.secondary)
+                            .padding(.top)
+                    }
+                } else if let error = loadError {
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 50))
+                            .foregroundColor(.red)
+                        Text("Failed to load inventory")
+                            .font(.headline)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                        Button("Retry") {
+                            Task { await loadItems() }
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
+                        .buttonStyle(.borderedProminent)
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        // Header
+                        header
+                        
+                        ScrollView {
+                            VStack(spacing: 16) {
+                                // Category Filter
+                                categoryFilter
+                                
+                                // Inventory Cards
+                                if filteredItems.isEmpty {
+                                    emptyState
+                                } else {
+                                    inventoryCards
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                        }
                     }
                 }
             }
@@ -185,7 +125,12 @@ struct InventoryView: View {
                 if showingDetail, let item = selectedItem {
                     ItemDetailOverlay(
                         item: binding(for: item),
-                        isPresented: $showingDetail
+                        isPresented: $showingDetail,
+                        onUpdate: { updatedItem in
+                            Task {
+                                await updateItem(updatedItem)
+                            }
+                        }
                     )
                     .transition(.opacity)
                 }
@@ -194,11 +139,99 @@ struct InventoryView: View {
                 AddItemView(
                     isPresented: $showingAddItem,
                     onAddItem: { newItem in
-                        inventoryItems.append(newItem)
+                        Task {
+                            await addItem(newItem)
+                        }
                     }
                 )
             }
             .animation(.easeInOut(duration: 0.25), value: showingDetail)
+            .task {
+                await loadItems()
+            }
+            .refreshable {
+                await loadItems()
+            }
+        }
+    }
+    
+    // MARK: - Empty State
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "archivebox")
+                .font(.system(size: 60))
+                .foregroundColor(.secondary)
+            Text("No items in \(selectedCategory)")
+                .font(.headline)
+            Text("Add your first item to get started")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .padding(.top, 60)
+    }
+    
+    // MARK: - Data Operations
+    private func loadItems() async {
+        isLoading = true
+        loadError = nil
+        
+        do {
+            inventoryItems = try await supabaseManager.fetchAllItems()
+        } catch {
+            loadError = error.localizedDescription
+            print(" Error loading items:", error)
+        }
+        
+        isLoading = false
+    }
+    
+    private func addItem(_ item: InventoryItem) async {
+        do {
+            let addedItem = try await supabaseManager.addItem(item)
+            await MainActor.run {
+                inventoryItems.append(addedItem)
+            }
+        } catch {
+            print("Error adding item:", error)
+            // Show error to user
+            loadError = "Failed to add item: \(error.localizedDescription)"
+        }
+    }
+    
+    private func updateItem(_ item: InventoryItem) async {
+        do {
+            try await supabaseManager.updateItem(item)
+            await MainActor.run {
+                if let index = inventoryItems.firstIndex(where: { $0.id == item.id }) {
+                    inventoryItems[index] = item
+                }
+            }
+        } catch {
+            print(" Error updating item:", error)
+            loadError = "Failed to update item: \(error.localizedDescription)"
+        }
+    }
+    
+    private func toggleBookmark(for item: InventoryItem) {
+        Task {
+            if let index = inventoryItems.firstIndex(where: { $0.id == item.id }) {
+                let newBookmarkState = !inventoryItems[index].isBookmarked
+                
+                // Optimistic update
+                await MainActor.run {
+                    inventoryItems[index].isBookmarked = newBookmarkState
+                }
+                
+                do {
+                    try await supabaseManager.toggleBookmark(item.id, isBookmarked: newBookmarkState)
+                } catch {
+                    // Revert on error
+                    await MainActor.run {
+                        inventoryItems[index].isBookmarked = !newBookmarkState
+                    }
+                    print("Error toggling bookmark:", error)
+                }
+            }
         }
     }
     
@@ -212,26 +245,43 @@ struct InventoryView: View {
     
     // MARK: - Header
     private var header: some View {
-        HStack(alignment: .center, spacing: 30) {
+        HStack(spacing: 6) {
+            // Left image
             Image(.image)
                 .resizable()
                 .scaledToFill()
                 .frame(width: 52, height: 52)
-                .foregroundColor(.white)
                 .background(Circle().fill(Color(UIColor.systemBlue)))
                 .clipShape(Circle())
                 .shadow(color: shadowColor, radius: 2, x: 0, y: 2)
-            
+
+            Spacer()
+
+            // Center title
             Text("Marketing Inventory")
                 .font(.title2)
                 .fontWeight(.bold)
-            
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(.center)
+                .offset(x: -4)
+
             Spacer()
+
+            // Right add button
+            Button(action: {
+                showingAddItem = true
+            }) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 30))
+                    .foregroundColor(.brandNavy)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .background(Color(UIColor.systemBackground))
     }
+
     
     // MARK: - Category Filter
     private var categoryFilter: some View {
@@ -244,17 +294,14 @@ struct InventoryView: View {
                         }
                     } label: {
                         ZStack {
-                            // Background with dynamic color
                             RoundedRectangle(cornerRadius: 20, style: .continuous)
                                 .fill(selectedCategory == category
                                       ? Color.brandNavy
                                       : Color(UIColor.secondarySystemBackground))
                             
-                            // Subtle stroke for edge contrast
                             RoundedRectangle(cornerRadius: 20, style: .continuous)
                                 .stroke(Color(UIColor.separator).opacity(0.25), lineWidth: 1)
                             
-                            // Label
                             Text(category)
                                 .font(.subheadline)
                                 .fontWeight(.medium)
@@ -262,45 +309,13 @@ struct InventoryView: View {
                                 .padding(.horizontal, 20)
                                 .padding(.vertical, 10)
                         }
-                        // Stronger, more visible shadow
                         .shadow(color: colorScheme == .dark ? Color.black.opacity(0.55) : Color.black.opacity(0.12),
                                 radius: 6, x: 0, y: 3)
                     }
                 }
             }
-            .padding(.horizontal, 2) // give shadows a bit of breathing room
+            .padding(.horizontal, 2)
             .padding(.vertical, 2)
-        }
-    }
-    
-    // MARK: - Search Bar
-    private var searchBar: some View {
-        HStack(spacing: 12) {
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(Color(UIColor.secondaryLabel))
-                
-                TextField("Search inventory", text: $searchText)
-                    .textFieldStyle(PlainTextFieldStyle())
-                
-                if !searchText.isEmpty {
-                    Button(action: { searchText = "" }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(Color(UIColor.secondaryLabel))
-                    }
-                }
-            }
-            .padding(12)
-            .background(Color(UIColor.secondarySystemBackground))
-            .cornerRadius(10)
-            
-            Button(action: {
-                showingAddItem = true
-            }) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundColor(.brandNavy)
-            }
         }
     }
     
@@ -309,8 +324,7 @@ struct InventoryView: View {
         LazyVStack(spacing: 12) {
             ForEach(filteredItems) { item in
                 InventoryCard(
-                    item: item,
-                    isBookmarked: item.isBookmarked,
+                    item: binding(for: item),
                     onBookmarkToggle: {
                         toggleBookmark(for: item)
                     },
@@ -320,12 +334,6 @@ struct InventoryView: View {
                     }
                 )
             }
-        }
-    }
-    
-    private func toggleBookmark(for item: InventoryItem) {
-        if let index = inventoryItems.firstIndex(where: { $0.id == item.id }) {
-            inventoryItems[index].isBookmarked.toggle()
         }
     }
 }
@@ -339,8 +347,7 @@ private extension InventoryItem {
 
 // MARK: - Inventory Card
 struct InventoryCard: View {
-    let item: InventoryItem
-    let isBookmarked: Bool
+    @Binding var item: InventoryItem
     let onBookmarkToggle: () -> Void
     let onTap: () -> Void
     
@@ -394,16 +401,16 @@ struct InventoryCard: View {
                     
                     Text("Quantity: \(item.quantity) pc")
                         .font(.system(size: 15))
-                        .foregroundColor(Color(UIColor.secondaryLabel))
+                        .foregroundColor(item.quantity < 50 ? Color(UIColor.systemRed) : Color(UIColor.secondaryLabel))
                 }
                 
                 Spacer()
                 
                 // Bookmark Button
                 Button(action: onBookmarkToggle) {
-                    Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                    Image(systemName: item.isBookmarked ? "bookmark.fill" : "bookmark")
                         .font(.system(size: 24, weight: .semibold))
-                        .foregroundColor(isBookmarked ? .brandNavy : Color(UIColor.secondaryLabel))
+                        .foregroundColor(item.isBookmarked ? .brandNavy : Color(UIColor.secondaryLabel))
                         .frame(width: 30)
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -426,18 +433,42 @@ struct InventoryCard: View {
 struct ItemDetailOverlay: View {
     @Binding var item: InventoryItem
     @Binding var isPresented: Bool
+    let onUpdate: (InventoryItem) -> Void
+    
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showingEditHistory = false
+    @State private var showingRecordTransfer = false
+    @State private var showingRestock = false
+    
+    // Helper to group history by transfers
+    private var groupedHistory: [[HistoryEntry]] {
+        var groups: [[HistoryEntry]] = []
+        var currentGroup: [HistoryEntry] = []
+        
+        for entry in item.history {
+            currentGroup.append(entry)
+            
+            if entry.label == "Last Updated" {
+                groups.append(currentGroup)
+                currentGroup = []
+            }
+        }
+        
+        if !currentGroup.isEmpty {
+            groups.append(currentGroup)
+        }
+        
+        return groups
+    }
     
     var body: some View {
         ZStack {
-            // Dimmed background - tap to dismiss
             Color.black.opacity(0.4)
                 .ignoresSafeArea()
                 .onTapGesture {
                     isPresented = false
                 }
             
-            // Card content
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     // Close button at top
@@ -517,7 +548,7 @@ struct ItemDetailOverlay: View {
                                 Text("\(item.quantity) pc")
                                     .font(.subheadline)
                                     .fontWeight(.medium)
-                                    .foregroundColor(.brandNavy)
+                                    .foregroundColor(item.quantity < 50 ? Color(UIColor.systemRed) : .brandNavy)
                             }
                             
                             HStack {
@@ -554,31 +585,52 @@ struct ItemDetailOverlay: View {
                     
                     // History Section
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("History:")
-                            .font(.headline)
-                            .fontWeight(.semibold)
+                        HStack {
+                            Text("History:")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            Spacer()
+                            Button(action: {
+                                showingEditHistory = true
+                            }) {
+                                Text("Edit History")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                            }
+                        }
                         
                         VStack(spacing: 0) {
-                            ForEach(Array(item.history.enumerated()), id: \.element.id) { index, entry in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Text("•")
-                                        .foregroundColor(Color(UIColor.secondaryLabel))
-                                    
-                                    Text("\(entry.label):")
-                                        .font(.subheadline)
-                                        .foregroundColor(Color(UIColor.secondaryLabel))
-                                    
-                                    Spacer()
-                                    
-                                    Text(entry.value)
-                                        .font(.subheadline)
-                                        .foregroundColor(Color(UIColor.label))
-                                        .multilineTextAlignment(.trailing)
+                            ForEach(Array(groupedHistory.enumerated()), id: \.offset) { groupIndex, group in
+                                VStack(spacing: 0) {
+                                    ForEach(Array(group.enumerated()), id: \.element.id) { entryIndex, entry in
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Text("•")
+                                                .foregroundColor(Color(UIColor.secondaryLabel))
+                                            
+                                            Text("\(entry.label):")
+                                                .font(.subheadline)
+                                                .foregroundColor(Color(UIColor.secondaryLabel))
+                                            
+                                            Spacer()
+                                            
+                                            Text(entry.value)
+                                                .font(.subheadline)
+                                                .foregroundColor(Color(UIColor.label))
+                                                .multilineTextAlignment(.trailing)
+                                        }
+                                        .padding(.vertical, 6)
+                                        
+                                        if entryIndex != group.count - 1 {
+                                            Divider()
+                                        }
+                                    }
                                 }
-                                .padding(.vertical, 6)
                                 
-                                if index != item.history.count - 1 {
-                                    Divider()
+                                if groupIndex != groupedHistory.count - 1 {
+                                    Rectangle()
+                                        .fill(Color(UIColor.separator))
+                                        .frame(height: 2)
+                                        .padding(.vertical, 12)
                                 }
                             }
                         }
@@ -587,9 +639,47 @@ struct ItemDetailOverlay: View {
                         .cornerRadius(8)
                     }
                     
+                    Divider()
+                    
+                    // Quick Actions
+                    HStack(spacing: 12) {
+                        Button(action: {
+                            showingRecordTransfer = true
+                        }) {
+                            HStack {
+                                Spacer()
+                                Image(systemName: "arrow.right.circle.fill")
+                                Text("Give Items")
+                                    .fontWeight(.semibold)
+                                Spacer()
+                            }
+                            .padding()
+                            .background(Color.brandNavy)
+                            .foregroundColor(.white)
+                            .cornerRadius(12)
+                        }
+                        
+                        Button(action: {
+                            showingRestock = true
+                        }) {
+                            HStack {
+                                Spacer()
+                                Image(systemName: "plus.circle.fill")
+                                Text("Restock")
+                                    .fontWeight(.semibold)
+                                Spacer()
+                            }
+                            .padding()
+                            .background(Color(red: 255/255, green: 202/255, blue: 0/255))
+                            .foregroundColor(.white)
+                            .cornerRadius(12)
+                        }
+                    }
+                    
                     // Bookmark Button
                     Button(action: {
                         item.isBookmarked.toggle()
+                        onUpdate(item)
                     }) {
                         HStack {
                             Spacer()
@@ -599,8 +689,8 @@ struct ItemDetailOverlay: View {
                             Spacer()
                         }
                         .padding()
-                        .background(item.isBookmarked ? Color.brandNavy : Color(UIColor.secondarySystemBackground))
-                        .foregroundColor(item.isBookmarked ? .white : Color(UIColor.label))
+                        .background(item.isBookmarked ? Color.brandNavy.opacity(0.1) : Color(UIColor.secondarySystemBackground))
+                        .foregroundColor(item.isBookmarked ? Color.brandNavy : Color(UIColor.label))
                         .cornerRadius(12)
                     }
                     
@@ -620,163 +710,115 @@ struct ItemDetailOverlay: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 60)
         }
+        .sheet(isPresented: $showingEditHistory) {
+            EditHistoryView(history: $item.history, onSave: {
+                onUpdate(item)
+            })
+        }
+        .sheet(isPresented: $showingRecordTransfer) {
+            RecordTransferView(item: $item, isPresented: $showingRecordTransfer, onSave: {
+                onUpdate(item)
+            })
+        }
+        .sheet(isPresented: $showingRestock) {
+            RestockView(item: $item, isPresented: $showingRestock, onSave: {
+                onUpdate(item)
+            })
+        }
     }
 }
 
-// MARK: - Item Detail View
-struct ItemDetailView: View {
-    @Binding var item: InventoryItem
-    @Binding var isPresented: Bool
-    @Environment(\.colorScheme) private var colorScheme
+// MARK: - EditHistoryView
+struct EditHistoryView: View {
+    @Binding var history: [HistoryEntry]
+    let onSave: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var newLabel: String = ""
+    @State private var addCustomLabel = false
+    
+    private let commonLabels = ["Date Received", "Logged By", "Given To", "Date Given", "Time Given", "Last Updated", "Notes"]
     
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // Item Image
-                    HStack {
-                        Spacer()
-                        Group {
-                            if item.isURLImage, let url = URL(string: item.imageName) {
-                                AsyncImage(url: url) { phase in
-                                    switch phase {
-                                    case .empty:
-                                        ProgressView()
-                                            .frame(width: 120, height: 120)
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 120, height: 120)
-                                            .clipped()
-                                    case .failure:
-                                        Image(systemName: "photo")
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 120, height: 120)
-                                            .padding(24)
-                                    @unknown default:
-                                        EmptyView()
-                                    }
-                                }
-                                .background(Color(UIColor.systemGray6))
-                                .cornerRadius(16)
-                            } else {
-                                Image(systemName: item.imageName)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 120, height: 120)
-                                    .padding(24)
-                                    .background(Color(UIColor.systemGray6))
-                                    .cornerRadius(16)
-                            }
-                        }
-                        Spacer()
-                    }
-                    .padding(.vertical, 12)
-                    
-                    // Item Name and Quantity
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(item.name)
-                            .font(.title)
-                            .fontWeight(.bold)
-                        
+            List {
+                Section(header: Text("Entries")) {
+                    ForEach($history) { $entry in
                         HStack {
-                            Text("Quantity:")
-                                .font(.headline)
-                                .foregroundColor(Color(UIColor.secondaryLabel))
-                            Text("\(item.quantity) pc")
-                                .font(.headline)
-                                .foregroundColor(.brandNavy)
-                        }
-                        
-                        HStack {
-                            Text("Category:")
-                                .font(.headline)
-                                .foregroundColor(Color(UIColor.secondaryLabel))
-                            Text(item.category)
-                                .font(.headline)
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    Divider()
-                        .padding(.horizontal)
-                    
-                    // Notes Section
-                    if let notes = item.notes {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Notes:")
-                                .font(.headline)
-                                .fontWeight(.semibold)
+                            Text(entry.label)
+                                .foregroundColor(.secondary)
+                                .frame(minWidth: 110, alignment: .leading)
                             
-                            Text(notes)
-                                .font(.body)
-                                .foregroundColor(Color(UIColor.secondaryLabel))
-                                .padding(12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color(UIColor.tertiarySystemBackground))
-                                .cornerRadius(8)
+                            TextField("Value", text: $entry.value)
+                                .textFieldStyle(PlainTextFieldStyle())
                         }
-                        .padding(.horizontal)
-                        
-                        Divider()
-                            .padding(.horizontal)
+                        .padding(.vertical, 8)
                     }
-                    
-                    // History Section
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("History:")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                            .padding(.horizontal)
-                        
-                        VStack(spacing: 0) {
-                            ForEach(Array(item.history.enumerated()), id: \.element.id) { index, entry in
-                                HStack(alignment: .top) {
-                                    Text("• \(entry.label):")
-                                        .font(.subheadline)
-                                        .foregroundColor(Color(UIColor.secondaryLabel))
-                                        .frame(width: 120, alignment: .leading)
-                                    
-                                    Text(entry.value)
-                                        .font(.subheadline)
-                                        .foregroundColor(Color(UIColor.label))
-                                    
-                                    Spacer()
-                                }
-                                .padding(.vertical, 6)
-                                .padding(.horizontal)
-                                
-                                if index != item.history.count - 1 {
-                                    Divider()
-                                        .padding(.leading, 40)
-                                }
-                            }
-                        }
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(12)
-                        .padding(.horizontal)
+                    .onDelete { indices in
+                        history.remove(atOffsets: indices)
                     }
-                    
-                    Spacer(minLength: 20)
-                }
-                .padding(.vertical, 20)
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") {
-                        isPresented = false
+                    .onMove { indices, newOffset in
+                        history.move(fromOffsets: indices, toOffset: newOffset)
                     }
                 }
                 
+                Section(header: Text("Add Entry")) {
+                    if addCustomLabel {
+                        HStack {
+                            TextField("Label", text: $newLabel)
+                            Button("Add") {
+                                let labelToUse = newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !labelToUse.isEmpty else { return }
+                                history.append(HistoryEntry(id: UUID(), label: labelToUse, value: ""))
+                                newLabel = ""
+                                addCustomLabel = false
+                            }
+                            .disabled(newLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack {
+                                ForEach(commonLabels, id: \.self) { label in
+                                    Button(action: {
+                                        history.append(HistoryEntry(id: UUID(), label: label, value: ""))
+                                    }) {
+                                        Text(label)
+                                            .padding(8)
+                                            .background(Color(UIColor.systemGray6))
+                                            .cornerRadius(8)
+                                    }
+                                }
+                                
+                                Button(action: {
+                                    addCustomLabel = true
+                                    newLabel = ""
+                                }) {
+                                    Image(systemName: "plus")
+                                        .padding(8)
+                                        .background(Color(UIColor.systemGray6))
+                                        .cornerRadius(8)
+                                }
+                            }
+                            .padding(.vertical, 6)
+                        }
+                    }
+                }
+            }
+            .listStyle(InsetGroupedListStyle())
+            .navigationTitle("Edit History")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        item.isBookmarked.toggle()
-                    }) {
-                        Image(systemName: item.isBookmarked ? "bookmark.fill" : "bookmark")
-                            .foregroundColor(.brandNavy)
+                    HStack {
+                        EditButton()
+                        Button("Done") {
+                            onSave()
+                            dismiss()
+                        }
+                        .fontWeight(.semibold)
                     }
                 }
             }
@@ -784,28 +826,213 @@ struct ItemDetailView: View {
     }
 }
 
-// MARK: - Supabase upload helper
-private func uploadImageToSupabase(_ image: UIImage) async throws -> URL {
-    // Configure as needed
-    let bucket = "item-images" // TODO: ensure this bucket exists in your Supabase project
-    let filename = UUID().uuidString + ".jpg"
-    let path = "items/\(filename)"
+// MARK: - Record Transfer View
+struct RecordTransferView: View {
+    @Binding var item: InventoryItem
+    @Binding var isPresented: Bool
+    let onSave: () -> Void
     
-    guard let data = image.jpegData(compressionQuality: 0.85) else {
-        throw NSError(domain: "Upload", code: -1, userInfo: [NSLocalizedDescriptionKey: "JPEG encoding failed"])
+    @State private var loggedBy = "Amy Portillo"
+    @State private var givenTo = ""
+    @State private var itemGiven = ""
+    @State private var quantityGiven = ""
+    @State private var transferNotes = ""
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Transfer Details")) {
+                    TextField("Logged By", text: $loggedBy)
+                    TextField("Given To", text: $givenTo)
+                    TextField("Item Given", text: $itemGiven)
+                    TextField("Quantity Given", text: $quantityGiven)
+                        .keyboardType(.numberPad)
+                }
+                
+                Section(header: Text("Notes (Optional)")) {
+                    TextEditor(text: $transferNotes)
+                        .frame(height: 80)
+                }
+                
+                Section {
+                    HStack {
+                        Text("Current Quantity:")
+                        Spacer()
+                        Text("\(item.quantity) pc")
+                            .fontWeight(.semibold)
+                    }
+                    
+                    if let qty = Int(quantityGiven), qty > 0 {
+                        HStack {
+                            Text("New Quantity:")
+                            Spacer()
+                            Text("\(max(0, item.quantity - qty)) pc")
+                                .fontWeight(.semibold)
+                                .foregroundColor(qty > item.quantity ? .red : .brandNavy)
+                        }
+                        
+                        if qty > item.quantity {
+                            Text("Quantity exceeds current stock")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Give Items")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        isPresented = false
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Record") {
+                        recordTransfer()
+                    }
+                    .disabled(loggedBy.isEmpty || givenTo.isEmpty || itemGiven.isEmpty || quantityGiven.isEmpty)
+                    .fontWeight(.semibold)
+                }
+            }
+        }
     }
     
-    // Upload
-    _ = try await supabase.storage
-        .from(bucket)
-        .upload(path, data: data, options: FileOptions(contentType: "image/jpeg", upsert: false))
-    
-    // Build a public URL (bucket must be public). For private buckets, generate a signed URL instead.
-    let publicURL = try supabase.storage.from(bucket).getPublicURL(path: path)
-    return publicURL
+    private func recordTransfer() {
+        guard let qty = Int(quantityGiven), qty > 0 else { return }
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MMMM d, yyyy"
+        let currentDate = dateFormatter.string(from: Date())
+        
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "h:mm a"
+        let currentTime = timeFormatter.string(from: Date())
+        
+        item.quantity = max(0, item.quantity - qty)
+        
+        var newHistory = item.history
+        newHistory.append(HistoryEntry(id: UUID(), label: "Logged By", value: loggedBy))
+        newHistory.append(HistoryEntry(id: UUID(), label: "Given To", value: givenTo))
+        newHistory.append(HistoryEntry(id: UUID(), label: "Item Given", value: itemGiven))
+        newHistory.append(HistoryEntry(id: UUID(), label: "Quantity Given", value: "\(qty) pc"))
+        newHistory.append(HistoryEntry(id: UUID(), label: "Date Given", value: currentDate))
+        newHistory.append(HistoryEntry(id: UUID(), label: "Time Given", value: currentTime))
+        
+        if !transferNotes.isEmpty {
+            newHistory.append(HistoryEntry(id: UUID(), label: "Notes", value: transferNotes))
+        }
+        
+        newHistory.append(HistoryEntry(id: UUID(), label: "Last Updated", value: "\(currentDate), \(currentTime)"))
+        
+        item.history = newHistory
+        
+        let noteText = "Delivered to \(givenTo)"
+        if let existingNotes = item.notes {
+            item.notes = existingNotes + "\n" + noteText
+        } else {
+            item.notes = noteText
+        }
+        
+        onSave()
+        isPresented = false
+    }
 }
 
-// MARK: - Add Item View (with photo picker)
+// MARK: - Restock View
+struct RestockView: View {
+    @Binding var item: InventoryItem
+    @Binding var isPresented: Bool
+    let onSave: () -> Void
+    
+    @State private var quantityToAdd = ""
+    @State private var restockNotes = ""
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Restock Details")) {
+                    TextField("Quantity to Add", text: $quantityToAdd)
+                        .keyboardType(.numberPad)
+                }
+                
+                Section(header: Text("Notes (Optional)")) {
+                    TextEditor(text: $restockNotes)
+                        .frame(height: 80)
+                }
+                
+                Section {
+                    HStack {
+                        Text("Current Quantity:")
+                        Spacer()
+                        Text("\(item.quantity) pc")
+                            .fontWeight(.semibold)
+                    }
+                    
+                    if let qty = Int(quantityToAdd), qty > 0 {
+                        HStack {
+                            Text("New Quantity:")
+                            Spacer()
+                            Text("\(item.quantity + qty) pc")
+                                .fontWeight(.semibold)
+                                .foregroundColor(.green)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Restock Item")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        isPresented = false
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Add") {
+                        recordRestock()
+                    }
+                    .disabled(quantityToAdd.isEmpty)
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+    
+    private func recordRestock() {
+        guard let qty = Int(quantityToAdd), qty > 0 else { return }
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MMMM d, yyyy"
+        let currentDate = dateFormatter.string(from: Date())
+        
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "h:mm a"
+        let currentTime = timeFormatter.string(from: Date())
+        
+        item.quantity += qty
+        
+        var newHistory = item.history
+        newHistory.append(HistoryEntry(id: UUID(), label: "Restocked", value: "\(qty) pc"))
+        newHistory.append(HistoryEntry(id: UUID(), label: "Restock Date", value: currentDate))
+        newHistory.append(HistoryEntry(id: UUID(), label: "Logged By", value: "Amy Portillo"))
+        
+        if !restockNotes.isEmpty {
+            newHistory.append(HistoryEntry(id: UUID(), label: "Restock Notes", value: restockNotes))
+        }
+        
+        newHistory.append(HistoryEntry(id: UUID(), label: "Last Updated", value: "\(currentDate), \(currentTime)"))
+        
+        item.history = newHistory
+        
+        onSave()
+        isPresented = false
+    }
+}
+
+// MARK: - Add Item View
 struct AddItemView: View {
     @Binding var isPresented: Bool
     let onAddItem: (InventoryItem) -> Void
@@ -814,17 +1041,24 @@ struct AddItemView: View {
     @State private var itemId = ""
     @State private var quantity = ""
     @State private var selectedCategory = "Merchandise"
-    @State private var selectedIcon = "tshirt"
     @State private var notes = ""
     
-    // Photo picker state
+    @State private var loggedBy = "Amy Portillo"
+    @State private var dateReceived = Date()
+    @State private var givenTo = ""
+    @State private var itemGiven = ""
+    @State private var quantityGiven = ""
+    @State private var dateGiven = Date()
+    @State private var timeGiven = Date()
+    @State private var historyNotes = ""
+    
     @State private var photoItem: PhotosPickerItem? = nil
     @State private var pickedImage: UIImage? = nil
-    // Will store the uploaded image’s public URL string from Supabase
     @State private var uploadedImageURLString: String? = nil
+    @State private var isUploading = false
+    @State private var uploadError: String? = nil
     
     let categories = ["Merchandise", "Decorations", "Banners"]
-    let iconOptions = ["tshirt", "hoodie", "mug", "backpack", "beanie", "flag", "tablecloth", "photo"]
     
     @Environment(\.colorScheme) private var colorScheme
     
@@ -833,7 +1067,11 @@ struct AddItemView: View {
             Form {
                 Section(header: Text("Item Details")) {
                     TextField("Item Name", text: $itemName)
-                    TextField("Item ID", text: $itemId)
+                        .autocapitalization(.words)
+                    
+                    TextField("Item ID (e.g., MERC-001)", text: $itemId)
+                        .autocapitalization(.allCharacters)
+                    
                     TextField("Quantity", text: $quantity)
                         .keyboardType(.numberPad)
                 }
@@ -847,133 +1085,158 @@ struct AddItemView: View {
                     .pickerStyle(SegmentedPickerStyle())
                 }
                 
-                Section(header: Text("Item Image")) {
-                    // Preview: either user-picked photo, or selected icon
-                    HStack {
-                        if let uiImage = pickedImage {
-                            Image(uiImage: uiImage)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 72, height: 72)
-                                .clipped()
-                                .cornerRadius(8)
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.brandNavy, lineWidth: 1))
-                            
-                            VStack(alignment: .leading) {
-                                Text("Custom photo selected")
+                Section(header: Text("Item Photo (Required)")) {
+                    if isUploading {
+                        HStack {
+                            ProgressView()
+                            Text("Uploading photo...")
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 8)
+                    } else if let uiImage = pickedImage {
+                        VStack(spacing: 12) {
+                            HStack {
+                                Image(uiImage: uiImage)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 100, height: 100)
+                                    .clipped()
+                                    .cornerRadius(8)
+                                
+                                Spacer()
+                                
+                                VStack(spacing: 8) {
+                                    if uploadedImageURLString != nil {
+                                        HStack {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundColor(.green)
+                                            Text("Uploaded")
+                                                .font(.caption)
+                                                .foregroundColor(.green)
+                                        }
+                                    } else if uploadError != nil {
+                                        HStack {
+                                            Image(systemName: "exclamationmark.circle.fill")
+                                                .foregroundColor(.red)
+                                            Text("Failed")
+                                                .font(.caption)
+                                                .foregroundColor(.red)
+                                        }
+                                    }
+                                    
+                                    PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
+                                        Text("Change Photo")
+                                            .font(.subheadline)
+                                            .foregroundColor(.brandNavy)
+                                    }
+                                    
+                                    Button("Remove Photo") {
+                                        pickedImage = nil
+                                        uploadedImageURLString = nil
+                                        photoItem = nil
+                                        uploadError = nil
+                                    }
                                     .font(.subheadline)
-                                Button("Remove Photo") {
-                                    pickedImage = nil
-                                    uploadedImageURLString = nil
+                                    .foregroundColor(.red)
                                 }
-                                .font(.caption)
                             }
-                        } else {
-                            Image(systemName: selectedIcon)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 72, height: 72)
-                                .padding(12)
-                                .background(Color(UIColor.systemGray6))
-                                .cornerRadius(8)
                             
-                            Text("No custom photo — using icon")
-                                .font(.subheadline)
-                        }
-                        
-                        Spacer()
-                        
-                        // PhotosPicker button
-                        PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
-                            VStack {
-                                Image(systemName: "photo.on.rectangle.angled")
-                                    .font(.title2)
-                                Text("Pick Photo")
+                            if let error = uploadError {
+                                Text("Upload failed: \(error)")
                                     .font(.caption)
-                            }
-                            .padding(8)
-                        }
-                        .onChange(of: photoItem) { _, newItem in
-                            guard let newItem else { // cleared selection
-                                Task { @MainActor in
-                                    pickedImage = nil
-                                    uploadedImageURLString = nil
-                                }
-                                return
-                            }
-                            Task {
-                                // Load image data locally for preview
-                                if let data = try? await newItem.loadTransferable(type: Data.self),
-                                   let uiImage = UIImage(data: data) {
-                                    await MainActor.run { self.pickedImage = uiImage }
-                                    // Upload to Supabase
-                                    do {
-                                        let url = try await uploadImageToSupabase(uiImage)
-                                        await MainActor.run {
-                                            self.uploadedImageURLString = url.absoluteString
-                                        }
-                                    } catch {
-                                        print("Supabase upload failed:", error)
-                                        await MainActor.run {
-                                            self.uploadedImageURLString = nil
-                                        }
-                                    }
-                                } else {
-                                    await MainActor.run {
-                                        self.pickedImage = nil
-                                        self.uploadedImageURLString = nil
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .padding(.vertical, 8)
-                    
-                    // Icon horizontal selector
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(iconOptions, id: \.self) { icon in
-                                Button(action: {
-                                    selectedIcon = icon
-                                    // Clear any photo selection
-                                    pickedImage = nil
-                                    uploadedImageURLString = nil
-                                }) {
-                                    VStack {
-                                        Image(systemName: icon)
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 40, height: 40)
-                                            .padding(12)
-                                            .background(
-                                                selectedIcon == icon && pickedImage == nil
-                                                    ? Color.brandNavy.opacity(0.2)
-                                                    : Color(UIColor.systemGray6)
-                                            )
-                                            .cornerRadius(8)
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 8)
-                                                    .stroke(
-                                                        (selectedIcon == icon && pickedImage == nil) ? Color.brandNavy : Color.clear,
-                                                        lineWidth: 2
-                                                    )
-                                            )
-                                    }
-                                }
-                                .buttonStyle(PlainButtonStyle())
+                                    .foregroundColor(.red)
                             }
                         }
                         .padding(.vertical, 8)
+                    } else {
+                        VStack(spacing: 8) {
+                            PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
+                                HStack {
+                                    Image(systemName: "photo.on.rectangle.angled")
+                                        .font(.title2)
+                                        .foregroundColor(.brandNavy)
+                                    Text("Select Photo")
+                                        .foregroundColor(.brandNavy)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .foregroundColor(Color(UIColor.tertiaryLabel))
+                                }
+                                .padding(.vertical, 8)
+                            }
+                            
+                            Text("Photo is required to add an item")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
                     }
-                    
-                    Text("You can pick a photo or choose an icon. Picked photos are uploaded to Supabase.")
-                        .font(.caption)
-                        .foregroundColor(Color(UIColor.secondaryLabel))
+                }
+                .onChange(of: photoItem) { _, newItem in
+                    guard let newItem else {
+                        Task { @MainActor in
+                            pickedImage = nil
+                            uploadedImageURLString = nil
+                            uploadError = nil
+                        }
+                        return
+                    }
+                    Task {
+                        await MainActor.run {
+                            isUploading = true
+                            uploadError = nil
+                        }
+                        
+                        if let data = try? await newItem.loadTransferable(type: Data.self),
+                           let uiImage = UIImage(data: data) {
+                            await MainActor.run { self.pickedImage = uiImage }
+                            do {
+                                let url = try await SupabaseManager.shared.uploadImage(uiImage)
+                                await MainActor.run {
+                                    self.uploadedImageURLString = url
+                                    self.isUploading = false
+                                    self.uploadError = nil
+                                }
+                            } catch {
+                                print("Supabase upload failed:", error)
+                                await MainActor.run {
+                                    self.uploadedImageURLString = nil
+                                    self.isUploading = false
+                                    self.uploadError = error.localizedDescription
+                                }
+                            }
+                        } else {
+                            await MainActor.run {
+                                self.pickedImage = nil
+                                self.uploadedImageURLString = nil
+                                self.isUploading = false
+                                self.uploadError = "Could not load image"
+                            }
+                        }
+                    }
                 }
                 
                 Section(header: Text("Notes (Optional)")) {
                     TextEditor(text: $notes)
-                        .frame(height: 100)
+                        .frame(height: 80)
+                }
+                
+                Section(header: Text("Initial History")) {
+                    TextField("Logged By", text: $loggedBy)
+                    DatePicker("Date Received", selection: $dateReceived, displayedComponents: .date)
+                }
+                
+                Section(header: Text("Transfer History (Optional)")) {
+                    TextField("Given To", text: $givenTo)
+                    TextField("Item Given", text: $itemGiven)
+                    TextField("Quantity Given", text: $quantityGiven)
+                        .keyboardType(.numberPad)
+                    
+                    if !givenTo.isEmpty {
+                        DatePicker("Date Given", selection: $dateGiven, displayedComponents: .date)
+                        DatePicker("Time Given", selection: $timeGiven, displayedComponents: .hourAndMinute)
+                    }
+                    
+                    TextEditor(text: $historyNotes)
+                        .frame(height: 60)
                 }
             }
             .navigationTitle("Add New Item")
@@ -989,46 +1252,77 @@ struct AddItemView: View {
                     Button("Add") {
                         addItem()
                     }
-                    .disabled(itemName.isEmpty || itemId.isEmpty || quantity.isEmpty)
+                    .disabled(!canAddItem)
                     .fontWeight(.semibold)
                 }
             }
         }
     }
     
+    private var canAddItem: Bool {
+        return !itemName.isEmpty &&
+               !itemId.isEmpty &&
+               !quantity.isEmpty &&
+               uploadedImageURLString != nil &&
+               !isUploading
+    }
+    
     private func addItem() {
-        guard let qty = Int(quantity) else { return }
+        guard let qty = Int(quantity), let imageURL = uploadedImageURLString else { return }
         
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "MMMM d, yyyy"
-        let currentDate = dateFormatter.string(from: Date())
+        let receivedDateString = dateFormatter.string(from: dateReceived)
         
         let timeFormatter = DateFormatter()
         timeFormatter.dateFormat = "h:mm a"
         let currentTime = timeFormatter.string(from: Date())
+        let currentDate = dateFormatter.string(from: Date())
         
-        // Prefer uploaded URL; otherwise use the chosen SF Symbol icon.
-        let imageIdentifier = uploadedImageURLString ?? selectedIcon
+        var finalHistory: [HistoryEntry] = []
+        
+        finalHistory.append(HistoryEntry(id: UUID(), label: "Date Received", value: receivedDateString))
+        finalHistory.append(HistoryEntry(id: UUID(), label: "Logged By", value: loggedBy))
+        
+        if !givenTo.isEmpty {
+            finalHistory.append(HistoryEntry(id: UUID(), label: "Given To", value: givenTo))
+            
+            if !itemGiven.isEmpty {
+                finalHistory.append(HistoryEntry(id: UUID(), label: "Item Given", value: itemGiven))
+            }
+            
+            if let qtyGiven = Int(quantityGiven), qtyGiven > 0 {
+                finalHistory.append(HistoryEntry(id: UUID(), label: "Quantity Given", value: "\(qtyGiven) pc"))
+            }
+            
+            let givenDateString = dateFormatter.string(from: dateGiven)
+            finalHistory.append(HistoryEntry(id: UUID(), label: "Date Given", value: givenDateString))
+            
+            let givenTimeString = timeFormatter.string(from: timeGiven)
+            finalHistory.append(HistoryEntry(id: UUID(), label: "Time Given", value: givenTimeString))
+            
+            if !historyNotes.isEmpty {
+                finalHistory.append(HistoryEntry(id: UUID(), label: "Notes", value: historyNotes))
+            }
+        }
+        
+        finalHistory.append(HistoryEntry(id: UUID(), label: "Last Updated", value: "\(currentDate), \(currentTime)"))
         
         let newItem = InventoryItem(
+            id: UUID(),
             name: itemName,
             quantity: qty,
             category: selectedCategory,
-            imageName: imageIdentifier,
+            imageName: imageURL,
             itemId: itemId,
             notes: notes.isEmpty ? nil : notes,
-            history: [
-                HistoryEntry(label: "Date Received", value: currentDate),
-                HistoryEntry(label: "Logged By", value: "Current User"),
-                HistoryEntry(label: "Last Updated", value: "\(currentDate), \(currentTime)")
-            ]
+            history: finalHistory
         )
         
         onAddItem(newItem)
         isPresented = false
     }
 }
-
 
 // MARK: - Preview
 struct InventoryView_Previews: PreviewProvider {
@@ -1044,4 +1338,3 @@ struct InventoryView_Previews: PreviewProvider {
         }
     }
 }
-
