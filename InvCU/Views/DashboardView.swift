@@ -6,9 +6,9 @@
 //
 
 import SwiftUI
-import Supabase // make sure you have your Supabase client imported
+import Supabase
 
-// MARK: - Models (sample)
+// MARK: - Models
 struct Stat: Identifiable {
     let id = UUID()
     let title: String
