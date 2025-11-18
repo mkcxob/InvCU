@@ -14,14 +14,12 @@ struct Learn: View {
                     Image(systemName: "shippingbox.fill")
                     Text("")
                 }
-            
-            Text("Search")
+            ItemLookupView()
                 .tabItem {
                     Image(systemName: "magnifyingglass")
                     Text("")
                 }
-            
-            Text("Notifications")
+            NotificationView()
                 .tabItem {
                     Image(systemName: "bell.fill")
                     Text("")

@@ -16,3 +16,4 @@ struct HistoryEntry: Identifiable, Codable, Equatable {
         lhs.id == rhs.id
     }
 }
+

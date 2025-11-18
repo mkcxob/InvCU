@@ -18,7 +18,7 @@ struct AddItemView: View {
     @State private var selectedCategory = "Merchandise"
     @State private var notes = ""
     
-    @State private var loggedBy = "Amy Portillo"
+    @State private var loggedBy = "Amy Portillo" // need update to match user
     @State private var dateReceived = Date()
     @State private var givenTo = ""
     @State private var itemGiven = ""

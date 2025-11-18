@@ -282,7 +282,7 @@ struct InventoryView: View {
     // MARK: - Header
     
     private var header: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 12) {
             Image(.image)
                 .resizable()
                 .scaledToFill()
@@ -302,7 +302,7 @@ struct InventoryView: View {
                 .offset(x: -4)
 
             Spacer()
-
+        
             Button(action: {
                 showingAddItem = true
             }) {

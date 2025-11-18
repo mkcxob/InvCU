@@ -6,20 +6,16 @@
 //
 
 
-//
-//  InventoryCard.swift
-//  InvCU
-//
-//  Created by work on 11/04/2025
-//
-
 import SwiftUI
+// @Binding means this view does NOT own the item.
+// It receives a live connection to the parent's InventoryItem,
+// so any changes made here (bookmark, quantity) it updates the parent view's data instantly.
 
 struct InventoryCard: View {
     @Binding var item: InventoryItem
     let onBookmarkToggle: () -> Void
     let onTap: () -> Void
-    
+    // takes the users light or dark system
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
@@ -80,7 +76,7 @@ struct InventoryCard: View {
                 onTap()
             }
             
-            // FIXED: Bookmark Button with proper state tracking
+            //Bookmark
             Button(action: {
                 print("InventoryCard: Bookmark button tapped for \(item.name)")
                 print("InventoryCard: Current bookmark state: \(item.isBookmarked)")

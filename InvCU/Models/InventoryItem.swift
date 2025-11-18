@@ -6,7 +6,7 @@
 //
 
 import Foundation
-
+//Equatable compares to values to see if they are equal
 struct InventoryItem: Identifiable, Codable, Equatable {
     let id: UUID
     var name: String
@@ -43,7 +43,7 @@ struct InventoryItem: Identifiable, Codable, Equatable {
         self.history = history
         self.isBookmarked = isBookmarked
     }
-    
+//Two InventoryItem objects are considered the same if their IDs match, checks for duplicates
     static func == (lhs: InventoryItem, rhs: InventoryItem) -> Bool {
         lhs.id == rhs.id
     }

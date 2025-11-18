@@ -1,3 +1,10 @@
+//
+//  SupabaseManager.swift
+//  InvCU
+//
+//  Created by work on 11/17/2025
+//
+
 import Foundation
 import Combine
 import SwiftUI
@@ -382,4 +389,167 @@ final class SupabaseManager: ObservableObject {
             throw error
         }
     }
+    
+    // MARK: - Fetch Activity Notifications from History Entries
+    func fetchActivityNotifications() async throws -> [ActivityNotification] {
+        print("Fetching activity notifications from history_entries...")
+        
+        // Fetch all history entries ordered by creation date (newest first)
+        let historyResponse = try await supabase
+            .from(historyTable)
+            .select()
+            .order("created_at", ascending: false)
+            .execute()
+        
+        let historyEntries = try JSONDecoder().decode([HistoryRow].self, from: historyResponse.data)
+        print("Fetched \(historyEntries.count) history entries")
+        
+        // Fetch all items to get names and categories
+        let itemsResponse = try await supabase
+            .from(itemsTable)
+            .select()
+            .execute()
+        
+        let items = try JSONDecoder().decode([InventoryRow].self, from: itemsResponse.data)
+        
+        // Create a dictionary for quick item lookup
+        let itemsDict = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        
+        // Fetch all profiles to get user names
+        struct ProfileRow: Codable {
+            let id: UUID
+            let full_name: String?
+            let username: String
+        }
+        
+        let profilesResponse = try await supabase
+            .from("profiles")
+            .select("id, full_name, username")
+            .execute()
+        
+        let profiles = try JSONDecoder().decode([ProfileRow].self, from: profilesResponse.data)
+        
+        // Create a dictionary for quick profile lookup
+        let profilesDict = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
+        
+        // Group history entries by "Last Updated" to identify separate activities
+        var activityGroups: [[HistoryRow]] = []
+        var currentGroup: [HistoryRow] = []
+        
+        // Sort by created_at and entry_order to ensure proper grouping
+        let sortedEntries = historyEntries.sorted { entry1, entry2 in
+            if entry1.created_at == entry2.created_at {
+                return entry1.entry_order < entry2.entry_order
+            }
+            return entry1.created_at ?? "" > entry2.created_at ?? ""
+        }
+        
+        for entry in sortedEntries {
+            currentGroup.append(entry)
+            
+            // When we hit "Last Updated", this marks the end of an activity group
+            if entry.label == "Last Updated" {
+                activityGroups.append(currentGroup)
+                currentGroup = []
+            }
+        }
+        
+        // Add any remaining entries
+        if !currentGroup.isEmpty {
+            activityGroups.append(currentGroup)
+        }
+        
+        print("Grouped into \(activityGroups.count) activities")
+        
+        // Convert grouped entries to notifications
+        var notifications: [ActivityNotification] = []
+        
+        for group in activityGroups {
+            guard let firstEntry = group.first,
+                  let item = itemsDict[firstEntry.item_id],
+                  let createdAt = firstEntry.created_at else {
+                print("Skipping group - missing data")
+                continue
+            }
+            
+            // Parse timestamp with multiple format options
+            let dateFormatter = ISO8601DateFormatter()
+            dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            
+            var timestamp: Date?
+            timestamp = dateFormatter.date(from: createdAt)
+            
+            // Try without fractional seconds if first attempt fails
+            if timestamp == nil {
+                dateFormatter.formatOptions = [.withInternetDateTime]
+                timestamp = dateFormatter.date(from: createdAt)
+            }
+            
+            guard let finalTimestamp = timestamp else {
+                print("Failed to parse date: \(createdAt)")
+                continue
+            }
+            
+            // Get user name
+            let profile = firstEntry.created_by.flatMap { profilesDict[$0] }
+            let userName = profile?.full_name ?? profile?.username ?? "Unknown User"
+            
+            // Determine action type based on labels in the group
+            let labels = Set(group.map { $0.label })
+            let action: ActivityNotification.ActivityAction
+            var quantity: Int? = nil
+            var recipient: String? = nil
+            
+            if labels.contains("Restocked") {
+                action = .restocked
+                if let restockEntry = group.first(where: { $0.label == "Restocked" }) {
+                    let qtyString = restockEntry.value
+                        .replacingOccurrences(of: " pc", with: "")
+                        .trimmingCharacters(in: .whitespaces)
+                    quantity = Int(qtyString)
+                }
+                print("Found restock activity: \(item.name) - \(quantity ?? 0) pc")
+            } else if labels.contains("Given To") {
+                action = .transferred
+                recipient = group.first(where: { $0.label == "Given To" })?.value
+                if let qtyEntry = group.first(where: { $0.label == "Quantity Given" }) {
+                    let qtyString = qtyEntry.value
+                        .replacingOccurrences(of: " pc", with: "")
+                        .trimmingCharacters(in: .whitespaces)
+                    quantity = Int(qtyString)
+                }
+                print("Found transfer activity: \(item.name) to \(recipient ?? "unknown") - \(quantity ?? 0) pc")
+            } else if labels.contains("Date Received") && !labels.contains("Restocked") && !labels.contains("Given To") {
+                action = .added
+                print("Found add activity: \(item.name)")
+            } else {
+                action = .updated
+                print("Found update activity: \(item.name)")
+            }
+            
+            // Extract notes if present in the group
+            let notesValue = group.first(where: { $0.label == "Notes" || $0.label == "Restock Notes" })?.value
+            
+            let notification = ActivityNotification(
+                id: firstEntry.id,
+                itemId: firstEntry.item_id,
+                itemName: item.name,
+                category: item.category,
+                userName: userName,
+                action: action,
+                quantity: quantity,
+                recipientName: recipient,
+                notes: notesValue,
+                timestamp: finalTimestamp
+            )
+            
+            notifications.append(notification)
+        }
+        
+        print("Generated \(notifications.count) notifications")
+        
+        // Sort by timestamp (newest first)
+        return notifications.sorted { $0.timestamp > $1.timestamp }
+    }
 }
+

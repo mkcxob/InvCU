@@ -294,22 +294,34 @@ struct ItemDetailOverlay: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 60)
         }
+        // When this view opens, match the local bookmark state
+        // with the item's real bookmark value.
         .onAppear {
             localBookmarkState = item.isBookmarked
         }
+        // If the parent changes item.isBookmarked elsewhere,
+        // update the local UI state so it stays in sync.
         .onChange(of: item.isBookmarked) { oldValue, newValue in
             localBookmarkState = newValue
         }
+        // Opens the Edit History sheet when showingEditHistory = true.
+        // Passes a binding so edits update the item's history.
+        // Calls onUpdate to save changes to the parent.
         .sheet(isPresented: $showingEditHistory) {
             EditHistoryView(history: $item.history, onSave: {
                 onUpdate(item)
             })
         }
+        // Opens the Record Transfer sheet.
+        // Gives it a binding to the item and to the sheet's own visible state.
+        // onSave tells the parent to update the item
         .sheet(isPresented: $showingRecordTransfer) {
             RecordTransferView(item: $item, isPresented: $showingRecordTransfer, onSave: {
                 onUpdate(item)
             })
         }
+        // Opens the Restock sheet.
+        // item is passed as a binding so any quantity changes update the parent.
         .sheet(isPresented: $showingRestock) {
             RestockView(item: $item, isPresented: $showingRestock, onSave: {
                 onUpdate(item)
