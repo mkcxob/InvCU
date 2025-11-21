@@ -10,9 +10,12 @@ import SwiftUI
 // MARK: - Notification View
 struct NotificationView: View {
     @StateObject private var supabaseManager = SupabaseManager.shared
+    @Binding var isAuthenticated: Bool
+    
     @State private var notifications: [ActivityNotification] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var isRefreshing = false
     
     @Environment(\.colorScheme) private var colorScheme
     
@@ -20,7 +23,8 @@ struct NotificationView: View {
         colorScheme == .dark ? Color.black.opacity(0.45) : Color.black.opacity(0.06)
     }
     
-    // Group notifications by date
+    /// Groups notifications by date (TODAY, YESTERDAY, or specific date)
+    /// Returns array of tuples with date string and associated notifications
     private var groupedNotifications: [(String, [ActivityNotification])] {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -45,7 +49,6 @@ struct NotificationView: View {
             grouped[key, default: []].append(notification)
         }
         
-        // Sort groups by date (most recent first)
         let sortedGroups = grouped.sorted { pair1, pair2 in
             if pair1.key == "TODAY" { return true }
             if pair2.key == "TODAY" { return false }
@@ -54,7 +57,6 @@ struct NotificationView: View {
             return pair1.key > pair2.key
         }
         
-        // Sort notifications within each group by timestamp (newest first)
         return sortedGroups.map { (key, notifications) in
             (key, notifications.sorted { $0.timestamp > $1.timestamp })
         }
@@ -67,93 +69,104 @@ struct NotificationView: View {
                     .ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    // Header
                     header
                     
-                    if isLoading && notifications.isEmpty {
-                        Spacer()
-                        ProgressView()
-                        Text("Loading notifications...")
-                            .foregroundColor(.secondary)
-                            .padding(.top)
-                        Spacer()
-                    } else if let error = errorMessage {
-                        Spacer()
-                        VStack(spacing: 16) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.system(size: 50))
-                                .foregroundColor(.red)
-                            Text("Failed to load notifications")
-                                .font(.headline)
-                            Text(error)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal)
-                            Button("Retry") {
-                                Task { await loadNotifications() }
+                    ZStack {
+                        if isLoading && notifications.isEmpty {
+                            VStack {
+                                Spacer()
+                                ProgressView()
+                                Text("Loading notifications...")
+                                    .foregroundColor(.secondary)
+                                    .padding(.top)
+                                Spacer()
                             }
-                            .buttonStyle(.borderedProminent)
-                        }
-                        Spacer()
-                    } else if notifications.isEmpty {
-                        Spacer()
-                        emptyState
-                        Spacer()
-                    } else {
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(groupedNotifications, id: \.0) { section in
-                                    sectionHeader(section.0)
-                                    
-                                    ForEach(section.1) { notification in
-                                        NotificationRow(notification: notification)
+                            .transition(.opacity)
+                        } else if let error = errorMessage, notifications.isEmpty {
+                            VStack(spacing: 16) {
+                                Spacer()
+                                Image(systemName: "exclamationmark.triangle")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.red)
+                                Text("Failed to load notifications")
+                                    .font(.headline)
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal)
+                                Button("Retry") {
+                                    Task { await loadNotifications() }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                Spacer()
+                            }
+                            .transition(.opacity)
+                        } else if notifications.isEmpty {
+                            VStack {
+                                Spacer()
+                                emptyState
+                                Spacer()
+                            }
+                            .transition(.opacity)
+                        } else {
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 0) {
+                                    ForEach(groupedNotifications, id: \.0) { section in
+                                        sectionHeader(section.0)
+                                        
+                                        ForEach(section.1) { notification in
+                                            NotificationRow(notification: notification)
+                                        }
                                     }
                                 }
+                                .padding(.horizontal, 20)
+                                .padding(.top, 16)
+                                .padding(.bottom, 20)
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.top, 16)
-                            .padding(.bottom, 20)
-                        }
-                        .refreshable {
-                            await loadNotifications()
+                            .opacity(isRefreshing ? 0.6 : 1.0)
+                            .animation(.easeInOut(duration: 0.2), value: isRefreshing)
+                            .refreshable {
+                                await refreshNotifications()
+                            }
+                            .transition(.opacity)
                         }
                     }
+                    .animation(.easeInOut(duration: 0.3), value: isLoading)
+                    .animation(.easeInOut(duration: 0.3), value: notifications.isEmpty)
                 }
             }
             .navigationBarHidden(true)
-            .onAppear {
-                if notifications.isEmpty {
-                    Task {
-                        await loadNotifications()
-                    }
-                }
+            .task {
+                await loadNotifications()
             }
         }
     }
     
     // MARK: - Header
+    
     private var header: some View {
         HStack {
-            Image(.image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 52, height: 52)
-                .background(Circle().fill(Color(UIColor.systemBlue)))
-                .clipShape(Circle())
-                .shadow(color: shadowColor, radius: 2, x: 0, y: 2)
+            NavigationLink(destination: ProfileView(isAuthenticated: $isAuthenticated)) {
+                Image(.image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 52, height: 52)
+                    .background(Circle().fill(Color(UIColor.systemBlue)))
+                    .clipShape(Circle())
+                    .shadow(color: shadowColor, radius: 2, x: 0, y: 2)
+            }
             
             Spacer()
             
-            Text("Notifications")
+            Text("Activity")
                 .font(.title2)
                 .fontWeight(.bold)
             
             Spacer()
             
-            // Invisible spacer to balance the header
             Color.clear
-                .frame(width: 44, height: 44)
+                .frame(width: 52, height: 52)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
@@ -161,6 +174,7 @@ struct NotificationView: View {
     }
     
     // MARK: - Section Header
+    
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
             .font(.subheadline)
@@ -172,6 +186,7 @@ struct NotificationView: View {
     }
     
     // MARK: - Empty State
+    
     private var emptyState: some View {
         VStack(spacing: 16) {
             Image(systemName: "bell.slash")
@@ -188,31 +203,71 @@ struct NotificationView: View {
     }
     
     // MARK: - Load Notifications from Supabase
+    
+    /// Fetches activity notifications from history_entries table on initial load
+    /// Shows full loading state with spinner
     private func loadNotifications() async {
-        isLoading = true
-        errorMessage = nil
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
         
         do {
-            print("Fetching notifications...")
+            print("DEBUG: Fetching notifications...")
             let fetchedNotifications = try await supabaseManager.fetchActivityNotifications()
             
             await MainActor.run {
-                self.notifications = fetchedNotifications
-                self.isLoading = false
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.notifications = fetchedNotifications
+                    self.isLoading = false
+                    self.errorMessage = nil
+                }
             }
             
-            print("Loaded \(fetchedNotifications.count) notifications")
+            print("DEBUG: Successfully loaded \(fetchedNotifications.count) notifications")
         } catch {
             await MainActor.run {
-                self.errorMessage = error.localizedDescription
-                self.isLoading = false
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.isLoading = false
+                    self.errorMessage = error.localizedDescription
+                }
+                print("ERROR: Failed to load notifications: \(error)")
+                print("ERROR: Full error: \(String(describing: error))")
             }
-            print("Error loading notifications:", error)
+        }
+    }
+    
+    /// Refreshes notifications when user pulls to refresh
+    /// Silently updates without showing errors to avoid disruption
+    private func refreshNotifications() async {
+        guard !isRefreshing else { return }
+        
+        await MainActor.run {
+            isRefreshing = true
+        }
+        
+        do {
+            print("DEBUG: Refreshing notifications...")
+            let fetchedNotifications = try await supabaseManager.fetchActivityNotifications()
+            
+            await MainActor.run {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    self.notifications = fetchedNotifications
+                    self.isRefreshing = false
+                }
+            }
+            
+            print("DEBUG: Successfully refreshed \(fetchedNotifications.count) notifications")
+        } catch {
+            await MainActor.run {
+                self.isRefreshing = false
+            }
+            print("WARNING: Failed to refresh notifications (silent): \(error)")
         }
     }
 }
 
-// MARK: - Notification Row (Matching Design)
+// MARK: - Notification Row
 struct NotificationRow: View {
     let notification: ActivityNotification
     
@@ -220,7 +275,6 @@ struct NotificationRow: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // Icon with background circle
             ZStack {
                 Circle()
                     .fill(notification.action.color.opacity(0.2))
@@ -231,7 +285,6 @@ struct NotificationRow: View {
                     .foregroundColor(notification.action.color)
             }
             
-            // Content
             VStack(alignment: .leading, spacing: 4) {
                 Text(notification.displayText)
                     .font(.system(size: 15))
@@ -256,10 +309,10 @@ struct NotificationRow: View {
 struct NotificationView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
-            NotificationView()
+            NotificationView(isAuthenticated: .constant(true))
                 .previewDisplayName("Light")
             
-            NotificationView()
+            NotificationView(isAuthenticated: .constant(true))
                 .previewDisplayName("Dark")
                 .preferredColorScheme(.dark)
         }

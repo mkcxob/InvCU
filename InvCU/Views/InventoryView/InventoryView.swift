@@ -13,6 +13,7 @@ struct InventoryView: View {
     // MARK: - State Management
     
     @StateObject private var supabaseManager = SupabaseManager.shared
+    @Binding var isAuthenticated: Bool
     
     @State private var selectedCategory = "Merchandise"
     @State private var searchText = ""
@@ -31,6 +32,7 @@ struct InventoryView: View {
     
     // MARK: - Computed Properties
     
+    /// Filters inventory items by selected category and search text
     var filteredItems: [InventoryItem] {
         inventoryItems.filter { item in
             let matchesCategory = item.category == selectedCategory
@@ -153,6 +155,7 @@ struct InventoryView: View {
     
     // MARK: - Data Operations
     
+    /// Fetches all inventory items from Supabase on initial load
     private func loadItems() async {
         isLoading = true
         loadError = nil
@@ -167,6 +170,7 @@ struct InventoryView: View {
         isLoading = false
     }
     
+    /// Refreshes inventory items when user pulls to refresh
     private func refreshItems() async {
         guard !isRefreshing else { return }
         
@@ -186,6 +190,7 @@ struct InventoryView: View {
         isRefreshing = false
     }
     
+    /// Adds new item to inventory and database
     private func addItem(_ item: InventoryItem) async {
         do {
             let addedItem = try await supabaseManager.addItem(item)
@@ -198,6 +203,7 @@ struct InventoryView: View {
         }
     }
     
+    /// Updates existing item in inventory and database
     private func updateItem(_ item: InventoryItem) async {
         do {
             try await supabaseManager.updateItem(item)
@@ -212,6 +218,8 @@ struct InventoryView: View {
         }
     }
     
+    /// Toggles bookmark state for item with optimistic UI update
+    /// Reverts on failure to maintain consistency
     private func toggleBookmark(for item: InventoryItem) {
         print("\n=== BOOKMARK TOGGLE START ===")
         print("Item: \(item.name)")
@@ -234,10 +242,8 @@ struct InventoryView: View {
         
         print("State change: \(oldState) -> \(newState)")
         
-        // Update the UI immediately
         inventoryItems[index].isBookmarked = newState
         
-        // Force UI refresh by updating the selected item if detail is showing
         if showingDetail, selectedItem?.id == item.id {
             selectedItem = inventoryItems[index]
         }
@@ -250,12 +256,10 @@ struct InventoryView: View {
             } catch {
                 print("ERROR: Database failed - \(error.localizedDescription)")
                 
-                // Revert on failure
                 await MainActor.run {
                     if let idx = inventoryItems.firstIndex(where: { $0.id == item.id }) {
                         inventoryItems[idx].isBookmarked = oldState
                         
-                        // Also revert selected item if showing detail
                         if showingDetail, selectedItem?.id == item.id {
                             selectedItem = inventoryItems[idx]
                         }
@@ -272,6 +276,7 @@ struct InventoryView: View {
         }
     }
     
+    /// Creates a binding for an item to allow two-way data flow in child views
     private func binding(for item: InventoryItem) -> Binding<InventoryItem> {
         guard let index = inventoryItems.firstIndex(where: { $0.id == item.id }) else {
             return .constant(item)
@@ -283,13 +288,15 @@ struct InventoryView: View {
     
     private var header: some View {
         HStack(spacing: 12) {
-            Image(.image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 52, height: 52)
-                .background(Circle().fill(Color(UIColor.systemBlue)))
-                .clipShape(Circle())
-                .shadow(color: shadowColor, radius: 2, x: 0, y: 2)
+            NavigationLink(destination: ProfileView(isAuthenticated: $isAuthenticated)) {
+                Image(.image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 52, height: 52)
+                    .background(Circle().fill(Color(UIColor.systemBlue)))
+                    .clipShape(Circle())
+                    .shadow(color: shadowColor, radius: 2, x: 0, y: 2)
+            }
 
             Spacer()
 
@@ -377,11 +384,11 @@ struct InventoryView: View {
 struct InventoryView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
-            InventoryView()
+            InventoryView(isAuthenticated: .constant(true))
                 .previewDisplayName("Light")
                 .preferredColorScheme(.light)
             
-            InventoryView()
+            InventoryView(isAuthenticated: .constant(true))
                 .previewDisplayName("Dark")
                 .preferredColorScheme(.dark)
         }

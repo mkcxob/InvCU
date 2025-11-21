@@ -13,76 +13,54 @@ struct Stat: Identifiable {
     let id = UUID()
     let title: String
     let value: String
-} 
-
-struct QuickAction: Identifiable {
-    let id = UUID()
-    let title: String
-    let systemIcon: String
-    let action: () -> Void
-}
-
-struct ActivityItem: Identifiable {
-    let id = UUID()
-    let date: String
-    let text: String
-}
-
-struct LowStockItem: Identifiable {
-    let id = UUID()
-    let name: String
-    let imageName: String
-    let remaining: Int
 }
 
 // MARK: - DashboardView
 struct DashboardView: View {
-    // Sample data
-    let stats = [
-        Stat(title: "Total Items", value: "247"),
-        Stat(title: "Total Scans", value: "189"),
-        Stat(title: "Low Stock Items", value: "58")
-    ]
+    @Binding var isAuthenticated: Bool
+    @StateObject private var supabaseManager = SupabaseManager.shared
     
-    let actions: [QuickAction] = [
-        QuickAction(title: "Scanner", systemIcon: "viewfinder") { print("scanner") },
-        QuickAction(title: "Inventory", systemIcon: "shippingbox.fill") { print("inventory") },
-        QuickAction(title: "Add an item", systemIcon: "plus.circle.fill") { print("add item") },
-        QuickAction(title: "Report", systemIcon: "chart.bar.fill") { print("report") }
-    ]
+    @State private var userName: String = "User"
+    @State private var totalItems: Int = 0
+    @State private var lowStockCount: Int = 0
+    @State private var recentActivities: [ActivityNotification] = []
+    @State private var lowStockItems: [InventoryItem] = []
+    @State private var isLoading = false
+    @State private var showingAddItem = false
     
-    let activities = [
-        ActivityItem(date: "10-15-2025 1:50 PM", text: "Amy Portillo checked out Gray Sweatshirt"),
-        ActivityItem(date: "10-15-2025 3:49 PM", text: "Amy Portillo checked out Blue Mug"),
-        ActivityItem(date: "10-15-2025 4:49 PM", text: "Amy Portillo checked out Blue Mug")
-    ]
+    @Environment(\.colorScheme) private var colorScheme
     
-    let lowStock = [
-        LowStockItem(name: "Gray Sweatshirt", imageName: "sweatshirt", remaining: 5),
-        LowStockItem(name: "Blue Backpack", imageName: "backpack", remaining: 5)
-    ]
-    
-    // Layout constants
     private let contentMaxWidth: CGFloat = 820
     private let cardCornerRadius: CGFloat = 12
     private let standardCardPadding: CGFloat = 16
     
-    @Environment(\.colorScheme) private var colorScheme
-    
-    // MARK: - User name state
-    @State private var userName: String = "User" // default fallback
+    /// Computed stats based on real data
+    private var stats: [Stat] {
+        [
+            Stat(title: "Total Items", value: "\(totalItems)"),
+            Stat(title: "Categories", value: "3"),
+            Stat(title: "Low Stock Items", value: "\(lowStockCount)")
+        ]
+    }
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ScrollView {
                 VStack {
                     VStack(alignment: .leading, spacing: 18) {
                         header
-                        statsCard
-                        quickAccessGrid
-                        recentActivityCard
-                        lowStockCard
-                        Spacer(minLength: 36)
+                        
+                        if isLoading {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 40)
+                        } else {
+                            statsCard
+                            quickAccessGrid
+                            recentActivityCard
+                            lowStockCard
+                            Spacer(minLength: 36)
+                        }
                     }
                     .frame(maxWidth: contentMaxWidth)
                     .padding(.vertical, 16)
@@ -91,38 +69,74 @@ struct DashboardView: View {
                 .frame(maxWidth: .infinity)
                 .background(Color(UIColor.systemBackground))
             }
-            .navigationBarHidden(true)
-            .task {
-                // Initial fetch if already signed in
-                await fetchUserName()
+            .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $showingAddItem) {
+                AddItemView(
+                    isPresented: $showingAddItem,
+                    onAddItem: { newItem in
+                        Task {
+                            await addItem(newItem)
+                        }
+                    }
+                )
             }
             .task {
-                // React to auth state changes (sign-in, token refresh) and refetch
+                await loadDashboardData()
+            }
+            .task {
                 for await (event, _) in supabase.auth.authStateChanges {
                     if event == .signedIn || event == .tokenRefreshed || event == .initialSession {
-                        await fetchUserName()
+                        await loadDashboardData()
                     }
                     if event == .signedOut {
                         await MainActor.run { userName = "User" }
                     }
                 }
             }
+            .refreshable {
+                await loadDashboardData()
+            }
         }
     }
     
-    // MARK: - Fetch user name from Supabase
-    private struct ProfileRow: Decodable {
-        // Match the JSON exactly
-        let full_name: String?
+    /// Loads all dashboard data from Supabase
+    private func loadDashboardData() async {
+        await MainActor.run { isLoading = true }
+        
+        async let nameTask: () = fetchUserName()
+        async let statsTask: () = fetchInventoryStats()
+        async let activitiesTask: () = fetchRecentActivities()
+        async let lowStockTask: () = fetchLowStockItems()
+        
+        await nameTask
+        await statsTask
+        await activitiesTask
+        await lowStockTask
+        
+        await MainActor.run { isLoading = false }
     }
-
+    
+    /// Adds new item to inventory
+    private func addItem(_ item: InventoryItem) async {
+        do {
+            _ = try await supabaseManager.addItem(item)
+            await loadDashboardData()
+            print("Item added successfully")
+        } catch {
+            print("Error adding item: \(error)")
+        }
+    }
+    
+    /// Fetches user's full name from profiles table
     private func fetchUserName() async {
         do {
-            // Fetch session; this throws if there is no session.
+            struct ProfileRow: Decodable {
+                let full_name: String?
+            }
+            
             let session = try await supabase.auth.session
             let userId = session.user.id
-
-            // Execute the query
+            
             let response = try await supabase
                 .from("profiles")
                 .select("full_name")
@@ -130,28 +144,62 @@ struct DashboardView: View {
                 .single()
                 .execute()
             
-            // Diagnostics
-            if let bodyString = String(data: response.data, encoding: .utf8) {
-                print("profiles response (\(response.status)): \(bodyString)")
-            } else {
-                print("profiles response (\(response.status)): <non-utf8 data>")
-            }
-            
-            // Decode with JSONDecoder (no special strategy needed)
             let row = try JSONDecoder().decode(ProfileRow.self, from: response.data)
             
             if let name = row.full_name, !name.isEmpty {
                 await MainActor.run { self.userName = name }
-            } else {
-                print("full_name not found or empty in response")
             }
         } catch {
-            // No session or other error; keep default "User"
             print("Failed to fetch user name: \(error)")
         }
     }
-
-    // MARK: - Reusable Section Title
+    
+    /// Fetches inventory statistics
+    private func fetchInventoryStats() async {
+        do {
+            let items = try await supabaseManager.fetchAllItems()
+            
+            let lowStock = items.filter { $0.quantity <= 10 }
+            
+            await MainActor.run {
+                totalItems = items.count
+                lowStockCount = lowStock.count
+            }
+        } catch {
+            print("Failed to fetch inventory stats: \(error)")
+        }
+    }
+    
+    /// Fetches recent 3 activity notifications
+    private func fetchRecentActivities() async {
+        do {
+            let allNotifications = try await supabaseManager.fetchActivityNotifications()
+            
+            await MainActor.run {
+                recentActivities = Array(allNotifications.prefix(3))
+            }
+        } catch {
+            print("Failed to fetch recent activities: \(error)")
+        }
+    }
+    
+    /// Fetches low stock items (quantity <= 10)
+    private func fetchLowStockItems() async {
+        do {
+            let items = try await supabaseManager.fetchAllItems()
+            
+            let lowStock = items.filter { $0.quantity <= 10 }
+                .sorted { $0.quantity < $1.quantity }
+            
+            await MainActor.run {
+                lowStockItems = Array(lowStock.prefix(2))
+            }
+        } catch {
+            print("Failed to fetch low stock items: \(error)")
+        }
+    }
+    
+    /// Reusable section title component
     @ViewBuilder
     private func SectionTitle(_ text: String) -> some View {
         Text(text)
@@ -162,16 +210,20 @@ struct DashboardView: View {
     }
     
     // MARK: - Header
+    
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(.image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 52, height: 52)
-                .foregroundColor(.white)
-                .background(Circle().fill(Color(UIColor.systemBlue)))
-                .clipShape(Circle())
-                .shadow(color: shadowColor, radius: 2, x: 0, y: 2)
+            NavigationLink(destination: ProfileView(isAuthenticated: $isAuthenticated)) {
+                Image(.image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 52, height: 52)
+                    .foregroundColor(.white)
+                    .background(Circle().fill(Color(UIColor.systemBlue)))
+                    .clipShape(Circle())
+                    .shadow(color: shadowColor, radius: 2, x: 0, y: 2)
+            }
+            .buttonStyle(PlainButtonStyle())
             
             VStack(alignment: .leading, spacing: 4) {
                 Text("Welcome back, \(userName)!")
@@ -187,7 +239,8 @@ struct DashboardView: View {
         .padding(.horizontal)
     }
     
-    // MARK: - Stats Card (Single Card)
+    // MARK: - Stats Card
+    
     private var statsCard: some View {
         VStack(spacing: 14) {
             SectionTitle("Quick Overview")
@@ -215,35 +268,40 @@ struct DashboardView: View {
     }
     
     // MARK: - Quick Access Grid
+    
     private var quickAccessGrid: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionTitle("Quick Access")
             
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                ForEach(actions) { a in
-                    Button(action: a.action) {
-                        VStack(spacing: 10) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.brandNavy)
-                                    .frame(width: 52, height: 52)
-                                Image(systemName: a.systemIcon)
-                                    .font(.title2)
-                                    .foregroundColor(.white)
-                            }
-                            Text(a.title)
-                                .font(.subheadline)
-                                .fontWeight(.regular)
-                                .foregroundColor(Color(UIColor.label))
-                                .multilineTextAlignment(.center)
-                                .frame(maxWidth: .infinity)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 110)
-                        .padding(.vertical, 6)
-                        .background(cardBackground)
-                        .cornerRadius(10)
-                        .shadow(color: shadowColor, radius: 4, x: 0, y: 3)
-                    }
+                Button(action: {
+                    showingAddItem = true
+                }) {
+                    QuickAccessButton(
+                        title: "Add an item",
+                        systemIcon: "plus.circle.fill"
+                    )
+                }
+                
+                NavigationLink(destination: InventoryView(isAuthenticated: $isAuthenticated)) {
+                    QuickAccessButton(
+                        title: "Inventory",
+                        systemIcon: "shippingbox.fill"
+                    )
+                }
+                
+                NavigationLink(destination: ItemLookupView(isAuthenticated: $isAuthenticated)) {
+                    QuickAccessButton(
+                        title: "Scanner",
+                        systemIcon: "viewfinder"
+                    )
+                }
+                
+                NavigationLink(destination: ProfileView(isAuthenticated: $isAuthenticated)) {
+                    QuickAccessButton(
+                        title: "Profile",
+                        systemIcon: "person.circle.fill"
+                    )
                 }
             }
         }
@@ -252,37 +310,53 @@ struct DashboardView: View {
     }
     
     // MARK: - Recent Activity Card
+    
     private var recentActivityCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionTitle("Recent Activity")
                 .padding(.bottom, 6)
             
-            VStack(spacing: 0) {
-                ForEach(Array(activities.enumerated()), id: \.element.id) { index, act in
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: "clock")
-                            .foregroundColor(Color(UIColor.secondaryLabel))
-                            .padding(.top, 2)
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(act.date)
-                                .font(.caption)
-                                .foregroundColor(Color(UIColor.secondaryLabel))
-                            Text(act.text)
-                                .font(.subheadline)
-                                .foregroundColor(Color(UIColor.label))
+            if recentActivities.isEmpty {
+                Text("No recent activity")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 20)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(recentActivities.enumerated()), id: \.element.id) { index, activity in
+                        HStack(alignment: .top, spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(activity.action.color.opacity(0.2))
+                                    .frame(width: 32, height: 32)
+                                
+                                Image(systemName: activity.action.icon)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(activity.action.color)
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(activity.timeString)
+                                    .font(.caption)
+                                    .foregroundColor(Color(UIColor.secondaryLabel))
+                                Text(activity.displayText)
+                                    .font(.subheadline)
+                                    .foregroundColor(Color(UIColor.label))
+                                    .lineLimit(2)
+                            }
+                            Spacer()
                         }
-                        Spacer()
-                    }
-                    .padding(.vertical, 12)
-                    
-                    if index != activities.count - 1 {
-                        Divider()
-                            .padding(.leading, 36)
+                        .padding(.vertical, 12)
+                        
+                        if index != recentActivities.count - 1 {
+                            Divider()
+                                .padding(.leading, 44)
+                        }
                     }
                 }
+                .padding(.horizontal, 2)
             }
-            .padding(.horizontal, 2)
         }
         .padding(standardCardPadding)
         .background(cardBackground)
@@ -292,34 +366,57 @@ struct DashboardView: View {
     }
     
     // MARK: - Low Stock Card
+    
     private var lowStockCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionTitle("Low Stock Items")
             
-            HStack(spacing: 12) {
-                ForEach(lowStock) { item in
-                    VStack(spacing: 8) {
-                        Image(systemName: "photo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 70, height: 70)
-                            .background(Color(UIColor.systemGray6))
-                            .cornerRadius(8)
-                        
-                        Text(item.name)
-                            .font(.subheadline)
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(Color(UIColor.label))
-                        
-                        Text("\(item.remaining) Left in Stock")
-                            .font(.caption)
-                            .foregroundColor(Color(UIColor.systemRed))
+            if lowStockItems.isEmpty {
+                Text("No low stock items")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 20)
+            } else {
+                HStack(spacing: 12) {
+                    ForEach(lowStockItems) { item in
+                        VStack(spacing: 8) {
+                            if item.isURLImage, let url = URL(string: item.imageName) {
+                                AsyncImage(url: url) { image in
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                } placeholder: {
+                                    ProgressView()
+                                }
+                                .frame(width: 70, height: 70)
+                                .background(Color(UIColor.systemGray6))
+                                .cornerRadius(8)
+                            } else {
+                                Image(systemName: "photo")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 70, height: 70)
+                                    .background(Color(UIColor.systemGray6))
+                                    .cornerRadius(8)
+                            }
+                            
+                            Text(item.name)
+                                .font(.subheadline)
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(Color(UIColor.label))
+                                .lineLimit(2)
+                            
+                            Text("\(item.quantity) Left in Stock")
+                                .font(.caption)
+                                .foregroundColor(Color(UIColor.systemRed))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(cardBackground)
+                        .cornerRadius(10)
+                        .shadow(color: shadowColor.opacity(0.6), radius: 4, x: 0, y: 3)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(cardBackground)
-                    .cornerRadius(10)
-                    .shadow(color: shadowColor.opacity(0.6), radius: 4, x: 0, y: 3)
                 }
             }
         }
@@ -330,7 +427,8 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     
-    // MARK: - Dynamic colors & helpers
+    // MARK: - Dynamic colors and helpers
+    
     private var cardBackground: Color {
         Color(UIColor.secondarySystemBackground)
     }
@@ -340,15 +438,50 @@ struct DashboardView: View {
     }
 }
 
+// MARK: - Quick Access Button Component
+struct QuickAccessButton: View {
+    let title: String
+    let systemIcon: String
+    @Environment(\.colorScheme) private var colorScheme
+    
+    private var shadowColor: Color {
+        colorScheme == .dark ? Color.black.opacity(0.45) : Color.black.opacity(0.06)
+    }
+    
+    var body: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(Color.brandNavy)
+                    .frame(width: 52, height: 52)
+                Image(systemName: systemIcon)
+                    .font(.title2)
+                    .foregroundColor(.white)
+            }
+            Text(title)
+                .font(.subheadline)
+                .fontWeight(.regular)
+                .foregroundColor(Color(UIColor.label))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity, minHeight: 110)
+        .padding(.vertical, 6)
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(10)
+        .shadow(color: shadowColor, radius: 4, x: 0, y: 3)
+    }
+}
+
 // MARK: - Preview
 struct DashboardView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
-            DashboardView()
+            DashboardView(isAuthenticated: .constant(true))
                 .previewDisplayName("Light")
                 .preferredColorScheme(.light)
             
-            DashboardView()
+            DashboardView(isAuthenticated: .constant(true))
                 .previewDisplayName("Dark iPad")
                 .preferredColorScheme(.dark)
                 .previewDevice("iPad (11-inch) (4th generation)")

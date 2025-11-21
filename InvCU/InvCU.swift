@@ -14,7 +14,7 @@ struct InvCUApp: App {
     var body: some Scene {
         WindowGroup {
             if isAuthenticated {
-                Learn()
+                Learn(isAuthenticated: $isAuthenticated)
             } else {
                 SignInView(isAuthenticated: $isAuthenticated)
             }

@@ -1,25 +1,29 @@
 import SwiftUI
 
 struct Learn: View {
+    @Binding var isAuthenticated: Bool
+    
     var body: some View {
         TabView {
-            DashboardView()
+            DashboardView(isAuthenticated: $isAuthenticated)
                 .tabItem {
                     Image(systemName: "house")
                     Text("")
                 }
             
-            InventoryView()
+            InventoryView(isAuthenticated: $isAuthenticated)
                 .tabItem {
                     Image(systemName: "shippingbox.fill")
                     Text("")
                 }
-            ItemLookupView()
+            
+            ItemLookupView(isAuthenticated: $isAuthenticated)
                 .tabItem {
                     Image(systemName: "magnifyingglass")
                     Text("")
                 }
-            NotificationView()
+            
+            NotificationView(isAuthenticated: $isAuthenticated)
                 .tabItem {
                     Image(systemName: "bell.fill")
                     Text("")
@@ -29,5 +33,5 @@ struct Learn: View {
 }
 
 #Preview {
-    Learn()
+    Learn(isAuthenticated: .constant(true))
 }

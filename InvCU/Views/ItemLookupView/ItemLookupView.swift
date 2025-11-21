@@ -10,20 +10,21 @@ import SwiftUI
 struct ItemLookupView: View {
     // MARK: - State Management
     
-    @StateObject private var supabaseManager = SupabaseManager.shared // Handles data fetching/updating
+    @StateObject private var supabaseManager = SupabaseManager.shared
+    @Binding var isAuthenticated: Bool
     
-    @State private var searchText = ""               // Text in the search field
-    @State private var searchResults: [InventoryItem] = [] // Stores items that match search
-    @State private var isSearching = false          // Shows loading indicator
-    @State private var searchError: String?         // Stores any search errors
+    @State private var searchText = ""
+    @State private var searchResults: [InventoryItem] = []
+    @State private var isSearching = false
+    @State private var searchError: String?
     
-    @State private var selectedItem: InventoryItem? // Item selected for detail view
-    @State private var showingDetail = false        // Controls detail overlay
-    @State private var showingBarcodeScanner = false // Shows barcode scanner sheet
+    @State private var selectedItem: InventoryItem?
+    @State private var showingDetail = false
+    @State private var showingBarcodeScanner = false
     
-    @State private var bookmarkInFlight: Set<UUID> = [] // Tracks bookmarks being updated
+    @State private var bookmarkInFlight: Set<UUID> = []
     
-    @Environment(\.colorScheme) private var colorScheme // Detect dark/light mode
+    @Environment(\.colorScheme) private var colorScheme
     
     // MARK: - Computed Properties
     
@@ -36,27 +37,27 @@ struct ItemLookupView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color(UIColor.systemBackground) // Background color
+                Color(UIColor.systemBackground)
                     .ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    header                   // Header with title and image
+                    header
                     
-                    searchControls            // Search bar + barcode button
+                    searchControls
                         .padding(.horizontal, 20)
                         .padding(.top, 16)
                     
                     ScrollView {
                         VStack(spacing: 16) {
-                            if isSearching {                  // Show loading
+                            if isSearching {
                                 loadingView
-                            } else if let error = searchError { // Show error
+                            } else if let error = searchError {
                                 errorView(error)
-                            } else if !searchResults.isEmpty { // Show results
+                            } else if !searchResults.isEmpty {
                                 searchResultsView
-                            } else if !searchText.isEmpty {   // Show no results
+                            } else if !searchText.isEmpty {
                                 noResultsView
-                            } else {                           // Show initial empty state
+                            } else {
                                 emptyStateView
                             }
                         }
@@ -69,23 +70,22 @@ struct ItemLookupView: View {
             .overlay {
                 if showingDetail, let item = selectedItem {
                     ItemDetailOverlay(
-                        item: binding(for: item),        // Pass binding to detail overlay
+                        item: binding(for: item),
                         isPresented: $showingDetail,
-                        onUpdate: { updatedItem in       // Update item callback
+                        onUpdate: { updatedItem in
                             Task { await updateItem(updatedItem) }
                         },
                         onBookmarkToggle: { tappedItem in
-                            toggleBookmark(for: tappedItem) // Toggle bookmark callback
+                            toggleBookmark(for: tappedItem)
                         }
                     )
                     .transition(.opacity)
                 }
             }
             .sheet(isPresented: $showingBarcodeScanner) {
-                // Show barcode scanner sheet
                 BarcodeScannerView(isPresented: $showingBarcodeScanner) { barcode in
                     searchText = barcode
-                    performSearch() // Auto-search barcode
+                    performSearch()
                 }
             }
             .animation(.easeInOut(duration: 0.25), value: showingDetail)
@@ -96,23 +96,25 @@ struct ItemLookupView: View {
     
     private var header: some View {
         HStack(spacing: 12) {
-            Image(.image) // Placeholder image
-                .resizable()
-                .scaledToFill()
-                .frame(width: 52, height: 52)
-                .background(Circle().fill(Color(UIColor.systemBlue)))
-                .clipShape(Circle())
-                .shadow(color: shadowColor, radius: 2, x: 0, y: 2)
+            NavigationLink(destination: ProfileView(isAuthenticated: $isAuthenticated)) {
+                Image(.image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 52, height: 52)
+                    .background(Circle().fill(Color(UIColor.systemBlue)))
+                    .clipShape(Circle())
+                    .shadow(color: shadowColor, radius: 2, x: 0, y: 2)
+            }
             
             Spacer()
             
-            Text("Search") // Title
+            Text("Search")
                 .font(.title)
                 .fontWeight(.bold)
             
             Spacer()
             
-            Color.clear  // Empty space to balance layout
+            Color.clear
                 .frame(width: 52, height: 52)
         }
         .padding(.horizontal, 20)
@@ -125,11 +127,11 @@ struct ItemLookupView: View {
     private var searchControls: some View {
         HStack(spacing: 12) {
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass") // Search icon
+                Image(systemName: "magnifyingglass")
                     .foregroundColor(Color(UIColor.secondaryLabel))
                     .font(.system(size: 16))
                 
-                TextField("Search", text: $searchText) // Text field for search
+                TextField("Search", text: $searchText)
                     .textFieldStyle(PlainTextFieldStyle())
                     .font(.system(size: 16))
                     .autocapitalization(.none)
@@ -137,7 +139,7 @@ struct ItemLookupView: View {
                     .submitLabel(.search)
                     .onSubmit { performSearch() }
                 
-                if !searchText.isEmpty { // Clear button
+                if !searchText.isEmpty {
                     Button(action: {
                         searchText = ""
                         searchResults = []
@@ -158,7 +160,6 @@ struct ItemLookupView: View {
                 radius: 4, x: 0, y: 2
             )
             
-            // Barcode scanner button
             Button(action: { showingBarcodeScanner = true }) {
                 HStack(spacing: 8) {
                     Image(systemName: "barcode.viewfinder")
@@ -183,7 +184,7 @@ struct ItemLookupView: View {
     
     private var loadingView: some View {
         VStack(spacing: 12) {
-            ProgressView() // Loading spinner
+            ProgressView()
                 .padding(.top, 40)
             Text("Searching...")
                 .font(.subheadline)
@@ -193,7 +194,7 @@ struct ItemLookupView: View {
     
     private func errorView(_ error: String) -> some View {
         VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle") // Error icon
+            Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 50))
                 .foregroundColor(.red)
                 .padding(.top, 40)
@@ -242,9 +243,9 @@ struct ItemLookupView: View {
         LazyVStack(spacing: 12) {
             ForEach(searchResults) { item in
                 InventoryCard(
-                    item: binding(for: item),      // Bind item for updates
+                    item: binding(for: item),
                     onBookmarkToggle: { toggleBookmark(for: item) },
-                    onTap: {                        // Open detail view
+                    onTap: {
                         selectedItem = item
                         showingDetail = true
                     }
@@ -255,20 +256,23 @@ struct ItemLookupView: View {
     
     // MARK: - Search Logic
     
+    /// Validates search text and initiates search
     private func performSearch() {
-        guard !searchText.trimmedIsEmpty else { // Skip empty search
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             searchResults = []
             return
         }
-        Task { await executeSearch() }           // Perform async search
+        Task { await executeSearch() }
     }
     
+    /// Fetches all items and filters by search query
+    /// Searches across item name, ID, and category
     private func executeSearch() async {
         isSearching = true
         searchError = nil
         
         do {
-            let allItems = try await supabaseManager.fetchAllItems() // Fetch all items
+            let allItems = try await supabaseManager.fetchAllItems()
             let query = searchText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             
             let filtered = allItems.filter { item in
@@ -277,7 +281,7 @@ struct ItemLookupView: View {
                 item.category.lowercased().contains(query)
             }
             
-            _ = await MainActor.run { searchResults = filtered } // Update UI
+            _ = await MainActor.run { searchResults = filtered }
         } catch {
             _ = await MainActor.run { searchError = error.localizedDescription }
         }
@@ -287,6 +291,7 @@ struct ItemLookupView: View {
     
     // MARK: - Data Operations
     
+    /// Updates item in database and refreshes search results
     private func updateItem(_ item: InventoryItem) async {
         do {
             try await supabaseManager.updateItem(item)
@@ -301,6 +306,8 @@ struct ItemLookupView: View {
         }
     }
     
+    /// Toggles bookmark state with optimistic UI update
+    /// Reverts to previous state if database operation fails
     private func toggleBookmark(for item: InventoryItem) {
         guard let index = searchResults.firstIndex(where: { $0.id == item.id }) else { return }
         
@@ -327,16 +334,11 @@ struct ItemLookupView: View {
         }
     }
     
+    /// Creates a binding for an item to allow two-way data flow in child views
     private func binding(for item: InventoryItem) -> Binding<InventoryItem> {
         guard let index = searchResults.firstIndex(where: { $0.id == item.id }) else { return .constant(item) }
-        return $searchResults[index] // Bind for updates in InventoryCard
+        return $searchResults[index]
     }
-}
-
-// MARK: - String Extension
-
-extension String {
-    var trimmedIsEmpty: Bool { self.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }
 
 // MARK: - Preview
@@ -344,11 +346,11 @@ extension String {
 struct ItemLookupView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
-            ItemLookupView()
+            ItemLookupView(isAuthenticated: .constant(true))
                 .previewDisplayName("Light")
                 .preferredColorScheme(.light)
             
-            ItemLookupView()
+            ItemLookupView(isAuthenticated: .constant(true))
                 .previewDisplayName("Dark")
                 .preferredColorScheme(.dark)
         }

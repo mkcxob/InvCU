@@ -43,7 +43,13 @@ private struct BookmarkRow: Codable {
 
 final class SupabaseManager: ObservableObject {
     static let shared = SupabaseManager()
-    private init() {}
+    
+    private init() {
+        // Initialize authentication state on app launch
+        Task {
+            await checkAuthenticationState()
+        }
+    }
     
     // MARK: - Configuration
     private let itemsTable = "inventory_items"
@@ -63,9 +69,47 @@ final class SupabaseManager: ObservableObject {
         let created_at: String?
     }
     
+    // MARK: - Check Authentication State
+    func checkAuthenticationState() async {
+        print("DEBUG: Checking authentication state...")
+        
+        do {
+            let session = try await supabase.auth.session
+            print("DEBUG: Found active session for user: \(session.user.id)")
+            
+            await MainActor.run {
+                self.currentUser = session.user
+            }
+            
+            try await fetchCurrentProfile()
+            print("DEBUG: Authentication state loaded successfully")
+        } catch {
+            print("DEBUG: No active session found: \(error)")
+            await MainActor.run {
+                self.currentUser = nil
+                self.currentProfile = nil
+            }
+        }
+    }
+    
     // MARK: - Helper: Get Current User ID
     private func currentUserId() async throws -> UUID {
+        // First check if we have currentUser cached
+        if let user = currentUser {
+            print("DEBUG: Using cached user ID: \(user.id)")
+            return user.id
+        }
+        
+        // Otherwise fetch from Supabase
+        print("DEBUG: Fetching session from Supabase...")
         let session = try await supabase.auth.session
+        
+        // Cache the user
+        await MainActor.run {
+            self.currentUser = session.user
+        }
+        
+        print("DEBUG: Retrieved user ID: \(session.user.id)")
         return session.user.id
     }
     
@@ -301,45 +345,69 @@ final class SupabaseManager: ObservableObject {
             .from("profiles")
             .insert(profile)
             .execute()
+        
+        await MainActor.run {
+            self.currentUser = user
+        }
+        
+        try await fetchCurrentProfile()
     }
     
     func signIn(email: String, password: String) async throws {
+        print("DEBUG: Attempting sign in for email: \(email)")
+        
         let session = try await supabase.auth.signIn(
             email: email,
             password: password
         )
+        
+        print("DEBUG: Sign in successful, user ID: \(session.user.id)")
         
         await MainActor.run {
             self.currentUser = session.user
         }
         
         try await fetchCurrentProfile()
+        
+        print("DEBUG: Current user set: \(String(describing: self.currentUser?.id))")
     }
     
     func signOut() async throws {
+        print("DEBUG: Signing out...")
+        
         try await supabase.auth.signOut()
         
         await MainActor.run {
             self.currentUser = nil
             self.currentProfile = nil
         }
+        
+        print("DEBUG: Sign out complete")
     }
     
     func hasActiveSession() async throws -> Bool {
         do {
             let session = try await supabase.auth.session
+            print("DEBUG: Found active session for user: \(session.user.id)")
+            
             await MainActor.run {
                 self.currentUser = session.user
             }
             try await fetchCurrentProfile()
             return true
         } catch {
+            print("DEBUG: No active session: \(error)")
             return false
         }
     }
     
-    private func fetchCurrentProfile() async throws {
-        guard let userId = currentUser?.id else { return }
+    func fetchCurrentProfile() async throws {
+        guard let userId = currentUser?.id else {
+            print("DEBUG: Cannot fetch profile - no current user")
+            return
+        }
+        
+        print("DEBUG: Fetching profile for user: \(userId)")
         
         let response = try await supabase
             .from("profiles")
@@ -349,6 +417,8 @@ final class SupabaseManager: ObservableObject {
             .execute()
         
         let profile = try JSONDecoder().decode(UserProfile.self, from: response.data)
+        
+        print("DEBUG: Profile fetched - username: \(profile.username), role: \(profile.role)")
         
         await MainActor.run {
             self.currentProfile = profile
@@ -552,4 +622,3 @@ final class SupabaseManager: ObservableObject {
         return notifications.sorted { $0.timestamp > $1.timestamp }
     }
 }
-
