@@ -1,4 +1,4 @@
-//// Supabase.swift
+// Supabase.swift
 //import Foundation
 //import Supabase
 //

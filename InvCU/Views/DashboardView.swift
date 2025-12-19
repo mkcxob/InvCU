@@ -127,7 +127,7 @@ struct DashboardView: View {
         }
     }
     
-    /// Fetches user's full name from profiles table
+    // Fetches user's full name from profiles table
     private func fetchUserName() async {
         do {
             struct ProfileRow: Decodable {
@@ -154,7 +154,7 @@ struct DashboardView: View {
         }
     }
     
-    /// Fetches inventory statistics
+    // Fetches inventory statistics
     private func fetchInventoryStats() async {
         do {
             let items = try await supabaseManager.fetchAllItems()
@@ -170,7 +170,7 @@ struct DashboardView: View {
         }
     }
     
-    /// Fetches recent 3 activity notifications
+    // Fetches recent 3 activity notifications
     private func fetchRecentActivities() async {
         do {
             let allNotifications = try await supabaseManager.fetchActivityNotifications()
@@ -183,7 +183,7 @@ struct DashboardView: View {
         }
     }
     
-    /// Fetches low stock items (quantity <= 10)
+    // Fetches low stock items (quantity <= 10)
     private func fetchLowStockItems() async {
         do {
             let items = try await supabaseManager.fetchAllItems()
@@ -199,7 +199,7 @@ struct DashboardView: View {
         }
     }
     
-    /// Reusable section title component
+    //Reusable section title component
     @ViewBuilder
     private func SectionTitle(_ text: String) -> some View {
         Text(text)

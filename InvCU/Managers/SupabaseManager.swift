@@ -51,7 +51,7 @@ final class SupabaseManager: ObservableObject {
         }
     }
     
-    // MARK: - Configuration
+    // MARK:  - Configuration
     private let itemsTable = "inventory_items"
     private let historyTable = "history_entries"
     private let bookmarksTable = "user_bookmarks"
@@ -71,11 +71,11 @@ final class SupabaseManager: ObservableObject {
     
     // MARK: - Check Authentication State
     func checkAuthenticationState() async {
-        print("DEBUG: Checking authentication state...")
+        print("DEBUG:  Checking authentication state...")
         
         do {
             let session = try await supabase.auth.session
-            print("DEBUG: Found active session for user: \(session.user.id)")
+            print("DEBUG: Found active session for user:  \(session.user.id)")
             
             await MainActor.run {
                 self.currentUser = session.user
@@ -84,7 +84,7 @@ final class SupabaseManager: ObservableObject {
             try await fetchCurrentProfile()
             print("DEBUG: Authentication state loaded successfully")
         } catch {
-            print("DEBUG: No active session found: \(error)")
+            print("DEBUG: No active session found:  \(error)")
             await MainActor.run {
                 self.currentUser = nil
                 self.currentProfile = nil
@@ -92,11 +92,11 @@ final class SupabaseManager: ObservableObject {
         }
     }
     
-    // MARK: - Helper: Get Current User ID
+    // MARK: - Helper:  Get Current User ID
     private func currentUserId() async throws -> UUID {
         // First check if we have currentUser cached
         if let user = currentUser {
-            print("DEBUG: Using cached user ID: \(user.id)")
+            print("DEBUG: Using cached user ID:  \(user.id)")
             return user.id
         }
         
@@ -113,7 +113,7 @@ final class SupabaseManager: ObservableObject {
         return session.user.id
     }
     
-    // MARK: - CRUD Operations
+    // MARK:  - CRUD Operations
     func fetchAllItems() async throws -> [InventoryItem] {
         print("Fetching all items...")
         
@@ -229,7 +229,7 @@ final class SupabaseManager: ObservableObject {
         return item
     }
     
-    // MARK: - Update Item
+    // MARK:  - Update Item
     func updateItem(_ item: InventoryItem) async throws {
         let userId = try await currentUserId()
         
@@ -256,7 +256,7 @@ final class SupabaseManager: ObservableObject {
             .eq("id", value: item.id)
             .execute()
         
-        // Replace history: delete existing, then insert current with NEW UUIDs and entry_order
+        // Replace history:  delete existing, then insert current with NEW UUIDs and entry_order
         _ = try await supabase
             .from(historyTable)
             .delete()
@@ -369,13 +369,17 @@ final class SupabaseManager: ObservableObject {
         
         try await fetchCurrentProfile()
         
-        print("DEBUG: Current user set: \(String(describing: self.currentUser?.id))")
+        print("DEBUG: Current user set:  \(String(describing: self.currentUser?.id))")
     }
     
     func signOut() async throws {
         print("DEBUG: Signing out...")
         
         try await supabase.auth.signOut()
+        
+        // Clear image cache when user signs out
+        // This ensures next user doesn't see previous user's cached images
+        ImageCache.shared.clearCache()
         
         await MainActor.run {
             self.currentUser = nil
@@ -396,7 +400,7 @@ final class SupabaseManager: ObservableObject {
             try await fetchCurrentProfile()
             return true
         } catch {
-            print("DEBUG: No active session: \(error)")
+            print("DEBUG: No active session:  \(error)")
             return false
         }
     }
@@ -425,16 +429,25 @@ final class SupabaseManager: ObservableObject {
         }
     }
     
-    // MARK: - Storage
+    // MARK:  - Storage (Updated with compression and resizing)
+    
+    /// Uploads an image to Supabase storage with automatic resizing and compression
+    /// Images are resized to max 1200px and compressed to reduce storage and bandwidth
     func uploadImage(_ image: UIImage) async throws -> String {
-        guard let data = image.jpegData(compressionQuality: 0.9) else {
+        // Resize image to reasonable size to save storage space and improve load times
+        let resizedImage = resizeImage(image, maxDimension: 1200)
+        
+        // Compress to 80% quality - good balance between quality and file size
+        guard let data = resizedImage.jpegData(compressionQuality: 0.8) else {
             throw NSError(domain: "SupabaseManager", code: -1,
                          userInfo: [NSLocalizedDescriptionKey: "Failed to encode image"])
         }
         
         let fileName = "\(UUID().uuidString).jpg"
+        let fileSizeKB = data.count / 1024
         
-        print("Uploading image to bucket: \(imagesBucket), path: \(fileName)")
+        print("Uploading image: \(fileName)")
+        print("Size: \(fileSizeKB) KB")
         
         do {
             try await supabase.storage
@@ -442,16 +455,18 @@ final class SupabaseManager: ObservableObject {
                 .upload(
                     fileName,
                     data: data,
-                    options: FileOptions(contentType: "image/jpeg", upsert: false)
+                    options: FileOptions(
+                        cacheControl: "public, max-age=31536000", // Cache for 1 year in CDN
+                        contentType: "image/jpeg",
+                        upsert: false
+                    )
                 )
-            
-            print("Upload successful")
             
             let publicURL = try supabase.storage
                 .from(imagesBucket)
                 .getPublicURL(path: fileName)
             
-            print("Public URL: \(publicURL)")
+            print("Upload successful")
             return publicURL.absoluteString
             
         } catch {
@@ -460,7 +475,44 @@ final class SupabaseManager: ObservableObject {
         }
     }
     
-    // MARK: - Fetch Activity Notifications from History Entries
+    /// Resizes an image to fit within maxDimension while maintaining aspect ratio
+    /// If image is already smaller than maxDimension, returns original
+    /// - Parameters:
+    ///   - image: The image to resize
+    ///   - maxDimension:  Maximum width or height in pixels
+    /// - Returns:  Resized image
+    private func resizeImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+        let size = image.size
+        
+        // If already small enough, return original to avoid unnecessary processing
+        if size.width <= maxDimension && size.height <= maxDimension {
+            return image
+        }
+        
+        // Calculate new size maintaining aspect ratio
+        let ratio = size.width / size.height
+        var newSize: CGSize
+        
+        if size.width > size.height {
+            // Landscape orientation
+            newSize = CGSize(width: maxDimension, height: maxDimension / ratio)
+        } else {
+            // Portrait or square orientation
+            newSize = CGSize(width: maxDimension * ratio, height: maxDimension)
+        }
+        
+        // Use UIGraphicsImageRenderer for efficient image rendering
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        let resizedImage = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+        
+        print("Resized image: \(Int(size.width))x\(Int(size.height)) to \(Int(newSize.width))x\(Int(newSize.height))")
+        
+        return resizedImage
+    }
+    
+    // MARK:  - Fetch Activity Notifications from History Entries
     func fetchActivityNotifications() async throws -> [ActivityNotification] {
         print("Fetching activity notifications from history_entries...")
         
@@ -511,7 +563,7 @@ final class SupabaseManager: ObservableObject {
             if entry1.created_at == entry2.created_at {
                 return entry1.entry_order < entry2.entry_order
             }
-            return entry1.created_at ?? "" > entry2.created_at ?? ""
+            return (entry1.created_at ?? "") > (entry2.created_at ?? "")
         }
         
         for entry in sortedEntries {
