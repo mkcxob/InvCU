@@ -7,7 +7,24 @@
 import UIKit
 import Foundation
 
-/// Manages image caching with both memory and disk storage
+// Private actor to manage download tasks safely in a concurrent context
+private actor DownloadTracker {
+    private var ongoingDownloads: [String: Task<UIImage?, Never>] = [:]
+    
+    func get(for url: String) -> Task<UIImage?, Never>? {
+        ongoingDownloads[url]
+    }
+    
+    func set(_ task: Task<UIImage?, Never>, for url: String) {
+        ongoingDownloads[url] = task
+    }
+    
+    func remove(for url: String) {
+        ongoingDownloads.removeValue(forKey: url)
+    }
+}
+
+// Manages image caching with both memory and disk storage
 final class ImageCache {
     static let shared = ImageCache()
     
@@ -16,19 +33,22 @@ final class ImageCache {
     private let memoryCache = NSCache<NSString, UIImage>()
     
     // Disk cache directory for persistent storage
-    private let diskCacheURL: URL
+    private let diskCacheURL:  URL
     private let fileManager = FileManager.default
     
     // Background queue for disk operations to avoid blocking main thread
     private let diskQueue = DispatchQueue(label: "com.invcu.imagecache.disk", qos: .utility)
     
+    // Actor for tracking ongoing downloads
+    private let downloadTracker = DownloadTracker()
+    
     private init() {
         // Configure memory cache limits to prevent excessive memory usage
-        memoryCache.countLimit = 100 // Maximum 100 images in memory
-        memoryCache.totalCostLimit = 50 * 1024 * 1024 // Maximum 50 MB in memory
+        memoryCache.countLimit = 200 // Increased to 200 images in memory
+        memoryCache.totalCostLimit = 100 * 1024 * 1024 // Increased to 100 MB in memory
         
         // Setup disk cache directory in app's cache folder
-        let cacheDirectory = fileManager.urls(for: .cachesDirectory, in: . userDomainMask)[0]
+        let cacheDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         diskCacheURL = cacheDirectory.appendingPathComponent("ImageCache", isDirectory: true)
         
         // Create cache directory if it doesn't exist
@@ -48,7 +68,7 @@ final class ImageCache {
     }
     
     // MARK: - Public API
-    //
+    
     // Retrieves an image from cache if available
     // Checks memory cache first (fastest), then disk cache
     // Returns nil if image is not cached
@@ -57,19 +77,17 @@ final class ImageCache {
         
         // Check memory cache first - this is the fastest lookup
         if let image = memoryCache.object(forKey: key as NSString) {
-            print("Cache HIT (memory): \(url.suffix(30))")
             return image
         }
         
-        // If not in memory, check disk cache
+        // If not in memory, check disk cache synchronously
+        // This is still very fast (reading from disk)
         if let image = loadImageFromDisk(key: key) {
-            print("Cache HIT (disk): \(url.suffix(30))")
             // Store in memory cache for faster access next time
             memoryCache.setObject(image, forKey: key as NSString)
             return image
         }
         
-        print("Cache MISS:  \(url.suffix(30))")
         return nil
     }
     
@@ -86,8 +104,54 @@ final class ImageCache {
         diskQueue.async { [weak self] in
             self?.saveImageToDisk(image, key: key)
         }
+    }
+    
+    // Async method to download and cache an image
+    // Returns the cached or downloaded image
+    // Prevents duplicate downloads for the same URL
+    func fetchImage(for url: String) async -> UIImage? {
+        print("fetchImage called for: \(url.suffix(40))")
         
-        print("Cached image: \(url.suffix(30))")
+        // Check if already cached
+        if let cached = getImage(for: url) {
+            print("    Found in cache (memory or disk)")
+            return cached
+        }
+        
+        print(" Not in cache, will download...")
+        
+        // Use the downloadTracker actor instead of DispatchQueue sync
+        if let existingTask = await downloadTracker.get(for: url) {
+            print("   ⏳ Download already in progress, waiting...")
+            // Download already in progress, wait for it
+            return await existingTask.value
+        }
+        
+        // Start new download
+        let task = Task<UIImage?, Never> {
+            await downloadImage(from: url)
+        }
+        await downloadTracker.set(task, for: url)
+        
+        let image = await task.value
+        
+        // Remove from ongoing downloads
+        await downloadTracker.remove(for: url)
+        
+        return image
+    }
+    
+    // Preload multiple images in the background
+    func preloadImages(urls: [String]) async {
+        print("preloadImages called with \(urls.count) URLs")
+        await withTaskGroup(of:  Void.self) { group in
+            for url in urls {
+                group.addTask {
+                    _ = await self.fetchImage(for: url)
+                }
+            }
+        }
+        print("preloadImages completed")
     }
     
     // Clears all cached images from both memory and disk
@@ -109,7 +173,7 @@ final class ImageCache {
     func getCacheSize() -> Int64 {
         var size: Int64 = 0
         
-        if let enumerator = fileManager.enumerator(at: diskCacheURL, includingPropertiesForKeys:  [.fileSizeKey]) {
+        if let enumerator = fileManager.enumerator(at: diskCacheURL, includingPropertiesForKeys: [.fileSizeKey]) {
             for case let fileURL as URL in enumerator {
                 if let fileSize = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
                     size += Int64(fileSize)
@@ -120,12 +184,54 @@ final class ImageCache {
         return size
     }
     
-    // MARK:  - Private Helpers
+    // MARK: - Private Helpers
+    
+    // Downloads an image from URL and caches it
+    private func downloadImage(from urlString: String) async -> UIImage? {
+        print("  Attempting to download:  \(urlString.suffix(50))")
+        
+        guard let url = URL(string: urlString) else {
+            print("    Invalid URL: \(urlString)")
+            return nil
+        }
+        
+        do {
+            print("  Connecting to server...")
+            let (data, response) = try await URLSession.shared.data(from: url)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("  HTTP Status: \(httpResponse.statusCode)")
+                if httpResponse.statusCode != 200 {
+                    print("   Non-200 status code received")
+                    return nil
+                }
+            }
+            
+            print("  Downloaded \(data.count) bytes")
+            
+            if let image = UIImage(data: data) {
+                // Cache the downloaded image
+                setImage(image, for: urlString)
+                print("  Successfully converted to UIImage and cached")
+                print("    Image size: \(image.size)")
+                return image
+            } else {
+                print("  Failed to convert data to UIImage")
+                return nil
+            }
+        } catch {
+            print("  Download failed: \(error.localizedDescription)")
+            if let urlError = error as? URLError {
+                print("   URLError code: \(urlError.code.rawValue)")
+            }
+            return nil
+        }
+    }
     
     // Generates a safe filename from a URL string
     // Uses percent encoding to remove special characters
     private func cacheKey(for url: String) -> String {
-        return url.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? UUID().uuidString
+        return url.addingPercentEncoding(withAllowedCharacters:  .alphanumerics) ?? UUID().uuidString
     }
     
     // Loads an image from disk cache
@@ -146,9 +252,9 @@ final class ImageCache {
     private func saveImageToDisk(_ image: UIImage, key: String) {
         let fileURL = diskCacheURL.appendingPathComponent(key)
         
-        // Compress image to JPEG with 85% quality
-        // This is a good balance between quality and file size
-        guard let data = image.jpegData(compressionQuality: 0.85) else {
+        // Compress image to JPEG with 90% quality (increased from 85%)
+        // Higher quality for better image appearance
+        guard let data = image.jpegData(compressionQuality: 0.90) else {
             print("Failed to compress image")
             return
         }
@@ -160,7 +266,7 @@ final class ImageCache {
         }
     }
     
-    //Handles memory warnings by clearing memory cache
+    // Handles memory warnings by clearing memory cache
     // Disk cache is preserved so images can be reloaded quickly
     @objc private func handleMemoryWarning() {
         print("Memory warning - clearing memory cache")
@@ -171,3 +277,4 @@ final class ImageCache {
         NotificationCenter.default.removeObserver(self)
     }
 }
+

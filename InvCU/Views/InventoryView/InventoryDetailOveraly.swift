@@ -12,36 +12,36 @@ struct ItemDetailOverlay: View {
     @Binding var isPresented: Bool
     let onUpdate: (InventoryItem) -> Void
     let onBookmarkToggle: (InventoryItem) -> Void
-    
+
     @Environment(\.colorScheme) private var colorScheme
     @State private var showingEditHistory = false
     @State private var showingRecordTransfer = false
     @State private var showingRestock = false
-    
+
     // Local state to force UI refresh
-    @State private var localBookmarkState: Bool = false
-    
+    @State private var localBookmarkState:  Bool = false
+
     // Helper to group history by transfers
     private var groupedHistory: [[HistoryEntry]] {
         var groups: [[HistoryEntry]] = []
         var currentGroup: [HistoryEntry] = []
-        
+
         for entry in item.history {
             currentGroup.append(entry)
-            
+
             if entry.label == "Last Updated" {
                 groups.append(currentGroup)
                 currentGroup = []
             }
         }
-        
+
         if !currentGroup.isEmpty {
             groups.append(currentGroup)
         }
-        
+
         return groups
     }
-    
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.4)
@@ -49,7 +49,7 @@ struct ItemDetailOverlay: View {
                 .onTapGesture {
                     isPresented = false
                 }
-            
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     // Close button at top
@@ -58,46 +58,41 @@ struct ItemDetailOverlay: View {
                         Button(action: {
                             isPresented = false
                         }) {
-                            Image(systemName: "xmark.circle.fill")
+                            Image(systemName:  "xmark. circle.fill")
                                 .font(.title2)
                                 .foregroundColor(Color(UIColor.secondaryLabel))
                         }
                     }
                     .padding(.top, 8)
-                    
-                    // Item Image
+
+                    // Item Image - USES CACHED UIIMAGE DIRECTLY FOR INSTANT LOADING
                     HStack {
                         Spacer()
                         Group {
-                            if item.isURLImage, let url = URL(string: item.imageName) {
-                                AsyncImage(url: url) { phase in
-                                    switch phase {
-                                    case .empty:
+                            if item.isURLImage {
+                                if let cachedImage = item.cachedUIImage {
+                                    // Show cached image INSTANTLY - NO DELAY
+                                    Image(uiImage: cachedImage)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 120, height:  120)
+                                        .clipped()
+                                        .cornerRadius(16)
+                                } else {
+                                    // Fallback if somehow not cached
+                                    ZStack {
+                                        Color(UIColor.systemGray6)
                                         ProgressView()
-                                            .frame(width: 120, height: 120)
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 120, height: 120)
-                                            .clipped()
-                                    case .failure:
-                                        Image(systemName: "photo")
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 120, height: 120)
-                                            .padding(24)
-                                    @unknown default:
-                                        EmptyView()
+                                            .tint(.brandNavy)
                                     }
+                                    .frame(width: 120, height: 120)
+                                    .cornerRadius(16)
                                 }
-                                .background(Color(UIColor.systemGray6))
-                                .cornerRadius(16)
                             } else {
                                 Image(systemName: item.imageName)
                                     .resizable()
                                     .scaledToFit()
-                                    .frame(width: 120, height: 120)
+                                    .frame(width: 120, height:  120)
                                     .padding(24)
                                     .background(Color(UIColor.systemGray6))
                                     .cornerRadius(16)
@@ -105,36 +100,36 @@ struct ItemDetailOverlay: View {
                         }
                         Spacer()
                     }
-                    
+
                     // Item Name and Details
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment:  .leading, spacing: 12) {
                         Text(item.name)
                             .font(.title)
                             .fontWeight(.bold)
-                        
+
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Text("Item ID:")
                                     .font(.subheadline)
                                     .foregroundColor(Color(UIColor.secondaryLabel))
                                 Text(item.itemId)
-                                    .font(.subheadline)
+                                    .font(. subheadline)
                                     .fontWeight(.medium)
                             }
-                            
+
                             HStack {
                                 Text("Quantity:")
                                     .font(.subheadline)
                                     .foregroundColor(Color(UIColor.secondaryLabel))
                                 Text("\(item.quantity) pc")
                                     .font(.subheadline)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(item.quantity < 50 ? Color(UIColor.systemRed) : .brandNavy)
+                                    .fontWeight(. medium)
+                                    .foregroundColor(item.quantity < 50 ? Color(UIColor.systemRed) : . brandNavy)
                             }
-                            
+
                             HStack {
                                 Text("Category:")
-                                    .font(.subheadline)
+                                    .font(. subheadline)
                                     .foregroundColor(Color(UIColor.secondaryLabel))
                                 Text(item.category)
                                     .font(.subheadline)
@@ -142,44 +137,44 @@ struct ItemDetailOverlay: View {
                             }
                         }
                     }
-                    
+
                     Divider()
-                    
+
                     // Notes Section
                     if let notes = item.notes {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Notes:")
                                 .font(.headline)
-                                .fontWeight(.semibold)
-                            
+                                .fontWeight(. semibold)
+
                             Text(notes)
                                 .font(.body)
                                 .foregroundColor(Color(UIColor.secondaryLabel))
                                 .padding(12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color(UIColor.tertiarySystemBackground))
+                                . background(Color(UIColor.tertiarySystemBackground))
                                 .cornerRadius(8)
                         }
-                        
+
                         Divider()
                     }
-                    
+
                     // History Section
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Text("History:")
                                 .font(.headline)
-                                .fontWeight(.semibold)
+                                .fontWeight(. semibold)
                             Spacer()
                             Button(action: {
                                 showingEditHistory = true
                             }) {
                                 Text("Edit History")
-                                    .font(.subheadline)
+                                    .font(. subheadline)
                                     .fontWeight(.semibold)
                             }
                         }
-                        
+
                         VStack(spacing: 0) {
                             ForEach(Array(groupedHistory.enumerated()), id: \.offset) { groupIndex, group in
                                 VStack(spacing: 0) {
@@ -187,26 +182,26 @@ struct ItemDetailOverlay: View {
                                         HStack(alignment: .top, spacing: 8) {
                                             Text("•")
                                                 .foregroundColor(Color(UIColor.secondaryLabel))
-                                            
+
                                             Text("\(entry.label):")
-                                                .font(.subheadline)
+                                                .font(. subheadline)
                                                 .foregroundColor(Color(UIColor.secondaryLabel))
-                                            
+
                                             Spacer()
-                                            
+
                                             Text(entry.value)
                                                 .font(.subheadline)
                                                 .foregroundColor(Color(UIColor.label))
                                                 .multilineTextAlignment(.trailing)
                                         }
-                                        .padding(.vertical, 6)
-                                        
+                                        . padding(. vertical, 6)
+
                                         if entryIndex != group.count - 1 {
                                             Divider()
                                         }
                                     }
                                 }
-                                
+
                                 if groupIndex != groupedHistory.count - 1 {
                                     Rectangle()
                                         .fill(Color(UIColor.separator))
@@ -219,9 +214,9 @@ struct ItemDetailOverlay: View {
                         .background(Color(UIColor.tertiarySystemBackground))
                         .cornerRadius(8)
                     }
-                    
+
                     Divider()
-                    
+
                     // Quick Actions
                     HStack(spacing: 12) {
                         Button(action: {
@@ -239,7 +234,7 @@ struct ItemDetailOverlay: View {
                             .foregroundColor(.white)
                             .cornerRadius(12)
                         }
-                        
+
                         Button(action: {
                             showingRestock = true
                         }) {
@@ -253,12 +248,12 @@ struct ItemDetailOverlay: View {
                             .padding()
                             .background(Color(red: 255/255, green: 202/255, blue: 0/255))
                             .foregroundColor(.white)
-                            .cornerRadius(12)
+                            . cornerRadius(12)
                         }
                     }
-                    
+
                     // Bookmark Button with local state forcing UI refresh
-                    Button(action: {
+                    Button(action:  {
                         print("ItemDetailOverlay: Bookmark tapped")
                         print("Current state: \(localBookmarkState)")
                         localBookmarkState.toggle()
@@ -269,20 +264,20 @@ struct ItemDetailOverlay: View {
                             Spacer()
                             Image(systemName: localBookmarkState ? "bookmark.fill" : "bookmark")
                             Text(localBookmarkState ? "Bookmarked" : "Bookmark Item")
-                                .fontWeight(.semibold)
+                                .fontWeight(. semibold)
                             Spacer()
                         }
                         .padding()
                         .background(localBookmarkState ? Color.brandNavy.opacity(0.1) : Color(UIColor.secondarySystemBackground))
-                        .foregroundColor(localBookmarkState ? Color.brandNavy : Color(UIColor.label))
+                        . foregroundColor(localBookmarkState ? Color.brandNavy : Color(UIColor.label))
                         .cornerRadius(12)
                     }
-                    
+
                     Spacer(minLength: 20)
                 }
                 .padding(24)
             }
-            .frame(maxWidth: 500)
+            . frame(maxWidth: 500)
             .background(Color(UIColor.systemBackground))
             .cornerRadius(20)
             .shadow(
@@ -291,7 +286,7 @@ struct ItemDetailOverlay: View {
                 x: 0,
                 y: 10
             )
-            .padding(.horizontal, 20)
+            .padding(. horizontal, 20)
             .padding(.vertical, 60)
         }
         // When this view opens, match the local bookmark state
@@ -299,7 +294,7 @@ struct ItemDetailOverlay: View {
         .onAppear {
             localBookmarkState = item.isBookmarked
         }
-        // If the parent changes item.isBookmarked elsewhere,
+        // If the parent changes item. isBookmarked elsewhere,
         // update the local UI state so it stays in sync.
         .onChange(of: item.isBookmarked) { oldValue, newValue in
             localBookmarkState = newValue
@@ -315,7 +310,7 @@ struct ItemDetailOverlay: View {
         // Opens the Record Transfer sheet.
         // Gives it a binding to the item and to the sheet's own visible state.
         // onSave tells the parent to update the item
-        .sheet(isPresented: $showingRecordTransfer) {
+        . sheet(isPresented: $showingRecordTransfer) {
             RecordTransferView(item: $item, isPresented: $showingRecordTransfer, onSave: {
                 onUpdate(item)
             })
@@ -329,3 +324,4 @@ struct ItemDetailOverlay: View {
         }
     }
 }
+

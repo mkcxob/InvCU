@@ -6,6 +6,8 @@
 //
 
 import Foundation
+import UIKit
+
 //Equatable compares to values to see if they are equal
 struct InventoryItem: Identifiable, Codable, Equatable {
     let id: UUID
@@ -17,11 +19,14 @@ struct InventoryItem: Identifiable, Codable, Equatable {
     var notes: String?
     var history: [HistoryEntry]
     var isBookmarked: Bool
-    
+
+    // This property is for UI/runtime use and is NOT codable.
+    var cachedUIImage: UIImage?
+
     var isURLImage: Bool {
         imageName.hasPrefix("http://") || imageName.hasPrefix("https://")
     }
-    
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -31,7 +36,8 @@ struct InventoryItem: Identifiable, Codable, Equatable {
         itemId: String,
         notes: String? = nil,
         history: [HistoryEntry] = [],
-        isBookmarked: Bool = false
+        isBookmarked: Bool = false,
+        cachedUIImage: UIImage? = nil
     ) {
         self.id = id
         self.name = name
@@ -42,9 +48,17 @@ struct InventoryItem: Identifiable, Codable, Equatable {
         self.notes = notes
         self.history = history
         self.isBookmarked = isBookmarked
+        self.cachedUIImage = cachedUIImage
     }
-//Two InventoryItem objects are considered the same if their IDs match, checks for duplicates
+
+    // Don't encode/decode cachedUIImage
+    private enum CodingKeys: String, CodingKey {
+        case id, name, quantity, category, imageName, itemId, notes, history, isBookmarked
+    }
+
+    //Two InventoryItem objects are considered the same if their IDs match, checks for duplicates
     static func == (lhs: InventoryItem, rhs: InventoryItem) -> Bool {
         lhs.id == rhs.id
     }
 }
+

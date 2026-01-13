@@ -1,5 +1,5 @@
 //
-//  InventoryView.swift
+//  InventoryView. swift
 //  InvCU
 //
 //  Created by work on 11/04/2025
@@ -30,9 +30,8 @@ struct InventoryView: View {
     
     let categories = ["Merchandise", "Decorations", "Banners"]
     
-    // MARK: - Computed Properties
+    // MARK:  - Computed Properties
     
-    /// Filters inventory items by selected category and search text
     var filteredItems: [InventoryItem] {
         inventoryItems.filter { item in
             let matchesCategory = item.category == selectedCategory
@@ -75,7 +74,7 @@ struct InventoryView: View {
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
                         Button("Retry") {
-                            Task { await loadItems() }
+                            Task { await loadItemsAndPreloadImages() }
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -129,7 +128,7 @@ struct InventoryView: View {
             }
             .animation(.easeInOut(duration: 0.25), value: showingDetail)
             .task {
-                await loadItems()
+                await loadItemsAndPreloadImages()
             }
             .refreshable {
                 await refreshItems()
@@ -155,16 +154,59 @@ struct InventoryView: View {
     
     // MARK: - Data Operations
     
-    /// Fetches all inventory items from Supabase on initial load
-    private func loadItems() async {
+    /// Fetches all inventory items from Supabase and preloads all images into memory
+    private func loadItemsAndPreloadImages() async {
         isLoading = true
         loadError = nil
         
         do {
-            inventoryItems = try await supabaseManager.fetchAllItems()
+            // Load items from database
+            var loadedItems = try await supabaseManager.fetchAllItems()
+            
+            print("\n===== IMAGE PRELOAD START =====")
+            print("Total items loaded: \(loadedItems.count)")
+            
+            // Count how many have URL images
+            let urlImageCount = loadedItems.filter { $0.isURLImage }.count
+            print("Items with URL images: \(urlImageCount)")
+            
+            // Preload all images and store directly in items
+            for index in loadedItems.indices {
+                let item = loadedItems[index]
+                
+                if item.isURLImage {
+                    print("\n[\(index + 1)/\(loadedItems.count)] Processing: \(item.name)")
+                    print("   URL:  \(item.imageName)")
+                    print("   Fetching image...")
+                    
+                    let startTime = Date()
+                    let image = await ImageCache.shared.fetchImage(for: item.imageName)
+                    let elapsed = Date().timeIntervalSince(startTime)
+                    
+                    loadedItems[index].cachedUIImage = image
+                    
+                    if let img = image {
+                        print("   SUCCESS:  Cached \(item.name)")
+                        print("   Image size: \(img.size.width)x\(img.size.height)")
+                        print("   Time:  \(String(format: "%.2f", elapsed))s")
+                    } else {
+                        print("   FAILED: Could not load image for \(item.name)")
+                        print("   Time: \(String(format: "%.2f", elapsed))s")
+                    }
+                } else {
+                    print("\n[\(index + 1)/\(loadedItems.count)] Skipping: \(item.name) (SF Symbol)")
+                }
+            }
+            
+            inventoryItems = loadedItems
+            
+            print("\n===== IMAGE PRELOAD COMPLETE =====")
+            print("Successfully cached:  \(loadedItems.filter { $0.cachedUIImage != nil }.count)/\(urlImageCount)")
+            print("=========================================\n")
+            
         } catch {
             loadError = error.localizedDescription
-            print("Error loading items:", error)
+            print("Error loading items: \(error)")
         }
         
         isLoading = false
@@ -178,10 +220,20 @@ struct InventoryView: View {
         loadError = nil
         
         do {
-            let newItems = try await supabaseManager.fetchAllItems()
+            var newItems = try await supabaseManager.fetchAllItems()
+            
+            // Preload images for new items
+            for index in newItems.indices {
+                if newItems[index].isURLImage {
+                    let image = await ImageCache.shared.fetchImage(for: newItems[index].imageName)
+                    newItems[index].cachedUIImage = image
+                }
+            }
+            
             await MainActor.run {
                 inventoryItems = newItems
             }
+            
         } catch {
             loadError = error.localizedDescription
             print("Error refreshing items:", error)
@@ -193,10 +245,17 @@ struct InventoryView: View {
     /// Adds new item to inventory and database
     private func addItem(_ item: InventoryItem) async {
         do {
-            let addedItem = try await supabaseManager.addItem(item)
+            var addedItem = try await supabaseManager.addItem(item)
+            
+            // Preload the new item's image
+            if addedItem.isURLImage {
+                addedItem.cachedUIImage = await ImageCache.shared.fetchImage(for: addedItem.imageName)
+            }
+            
             await MainActor.run {
                 inventoryItems.append(addedItem)
             }
+            
         } catch {
             print("Error adding item:", error)
             loadError = "Failed to add item: \(error.localizedDescription)"
@@ -209,7 +268,19 @@ struct InventoryView: View {
             try await supabaseManager.updateItem(item)
             await MainActor.run {
                 if let index = inventoryItems.firstIndex(where: { $0.id == item.id }) {
-                    inventoryItems[index] = item
+                    var updatedItem = item
+                    // Preserve cached image
+                    updatedItem.cachedUIImage = inventoryItems[index].cachedUIImage
+                    // Re-cache if image changed
+                    if updatedItem.isURLImage && updatedItem.imageName != inventoryItems[index].imageName {
+                        Task {
+                            updatedItem.cachedUIImage = await ImageCache.shared.fetchImage(for: updatedItem.imageName)
+                            if let idx = inventoryItems.firstIndex(where: { $0.id == item.id }) {
+                                inventoryItems[idx] = updatedItem
+                            }
+                        }
+                    }
+                    inventoryItems[index] = updatedItem
                 }
             }
         } catch {
@@ -219,7 +290,6 @@ struct InventoryView: View {
     }
     
     /// Toggles bookmark state for item with optimistic UI update
-    /// Reverts on failure to maintain consistency
     private func toggleBookmark(for item: InventoryItem) {
         print("\n=== BOOKMARK TOGGLE START ===")
         print("Item: \(item.name)")
@@ -231,7 +301,7 @@ struct InventoryView: View {
         }
         
         if bookmarkInFlight.contains(item.id) {
-            print("WARNING: Blocked - already in progress")
+            print("WARNING:  Blocked - already in progress")
             return
         }
         
@@ -371,7 +441,10 @@ struct InventoryView: View {
                         toggleBookmark(for: item)
                     },
                     onTap: {
-                        selectedItem = item
+                        // Find and use the item with cached image
+                        if let index = inventoryItems.firstIndex(where: { $0.id == item.id }) {
+                            selectedItem = inventoryItems[index]
+                        }
                         showingDetail = true
                     }
                 )
