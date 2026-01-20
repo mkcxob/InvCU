@@ -109,7 +109,7 @@ struct ItemDetailOverlay: View {
 
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Text("Item ID:")
+                                Text("Barcode:")
                                     .font(.subheadline)
                                     .foregroundColor(Color(UIColor.secondaryLabel))
                                 Text(item.itemId)
@@ -124,7 +124,7 @@ struct ItemDetailOverlay: View {
                                 Text("\(item.quantity) pc")
                                     .font(.subheadline)
                                     .fontWeight(. medium)
-                                    .foregroundColor(item.quantity < 50 ? Color(UIColor.systemRed) : . brandNavy)
+                                    .foregroundColor(item.quantity < 10 ? Color(UIColor.systemRed) : .brandNavy)
                             }
 
                             HStack {

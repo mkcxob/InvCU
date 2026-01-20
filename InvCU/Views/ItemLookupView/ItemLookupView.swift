@@ -22,7 +22,11 @@ struct ItemLookupView: View {
     @State private var showingDetail = false
     @State private var showingBarcodeScanner = false
     
-    @State private var bookmarkInFlight: Set<UUID> = []
+    @State private var bookmarkInFlight:  Set<UUID> = []
+    
+    @State private var cachedItems: [InventoryItem] = []
+    @State private var lastFetchTime: Date?
+    private let cacheTimeout: TimeInterval = 300
     
     @Environment(\.colorScheme) private var colorScheme
     
@@ -30,6 +34,11 @@ struct ItemLookupView: View {
     
     private var shadowColor: Color {
         colorScheme == .dark ? Color.black.opacity(0.45) : Color.black.opacity(0.06)
+    }
+    
+    private var isCacheValid: Bool {
+        guard let lastFetch = lastFetchTime else { return false }
+        return Date().timeIntervalSince(lastFetch) < cacheTimeout
     }
     
     // MARK: - Main Body
@@ -62,7 +71,7 @@ struct ItemLookupView: View {
                             }
                         }
                         .padding(.horizontal, 20)
-                        .padding(.vertical, 16)
+                        . padding(.vertical, 16)
                     }
                 }
             }
@@ -84,11 +93,18 @@ struct ItemLookupView: View {
             }
             .sheet(isPresented: $showingBarcodeScanner) {
                 BarcodeScannerView(isPresented: $showingBarcodeScanner) { barcode in
+                    print("BARCODE SCANNED")
+                    print("Raw barcode value: '\(barcode)'")
+                    print("Barcode length: \(barcode.count)")
+                    
                     searchText = barcode
                     performSearch()
                 }
             }
             .animation(.easeInOut(duration: 0.25), value: showingDetail)
+            .task {
+                await loadCacheIfNeeded()
+            }
         }
     }
     
@@ -97,7 +113,7 @@ struct ItemLookupView: View {
     private var header: some View {
         HStack(spacing: 12) {
             NavigationLink(destination: ProfileView(isAuthenticated: $isAuthenticated)) {
-                Image(.image)
+                Image(. image)
                     .resizable()
                     .scaledToFill()
                     .frame(width: 52, height: 52)
@@ -133,7 +149,7 @@ struct ItemLookupView: View {
                 
                 TextField("Search", text: $searchText)
                     .textFieldStyle(PlainTextFieldStyle())
-                    .font(.system(size: 16))
+                    . font(.system(size: 16))
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
                     .submitLabel(.search)
@@ -145,13 +161,13 @@ struct ItemLookupView: View {
                         searchResults = []
                         searchError = nil
                     }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(Color(UIColor.secondaryLabel))
-                            .font(.system(size: 16))
+                        Image(systemName:  "xmark. circle.fill")
+                            . foregroundColor(Color(UIColor.secondaryLabel))
+                            . font(.system(size: 16))
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            . padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(Color(UIColor.secondarySystemBackground))
             .cornerRadius(12)
@@ -188,7 +204,7 @@ struct ItemLookupView: View {
                 .padding(.top, 40)
             Text("Searching...")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(. secondary)
         }
     }
     
@@ -196,16 +212,16 @@ struct ItemLookupView: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 50))
-                .foregroundColor(.red)
+                .foregroundColor(. red)
                 .padding(.top, 40)
             Text("Search Error")
                 .font(.headline)
             Text(error)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(. secondary)
                 .multilineTextAlignment(.center)
             Button("Try Again") { performSearch() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(. borderedProminent)
         }
     }
     
@@ -213,7 +229,7 @@ struct ItemLookupView: View {
         VStack(spacing: 16) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 60))
-                .foregroundColor(.secondary)
+                .foregroundColor(. secondary)
                 .padding(.top, 60)
             Text("No items found")
                 .font(.headline)
@@ -231,7 +247,7 @@ struct ItemLookupView: View {
                 .padding(.top, 60)
             Text("Search for items")
                 .font(.headline)
-            Text("Enter an item name, ID, or scan a barcode")
+            Text("Enter an item name, barcode, or scan a barcode")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -254,36 +270,120 @@ struct ItemLookupView: View {
         }
     }
     
+    // MARK: - Cache Management
+
+    private func loadCacheIfNeeded() async {
+        guard !isCacheValid else { return }
+        
+        do {
+            var items = try await supabaseManager.fetchAllItems()
+            
+            print("SEARCH CACHE:  IMAGE PRELOAD START")
+            print("Total items:  \(items.count)")
+            
+            for index in items.indices {
+                if items[index].isURLImage {
+                    print("Preloading image for:  \(items[index].name)")
+                    let image = await ImageCache.shared.fetchImage(for: items[index].imageName)
+                    items[index].cachedUIImage = image
+                    
+                    if image != nil {
+                        print("Cached:  \(items[index].name)")
+                    } else {
+                        print("Failed:  \(items[index].name)")
+                    }
+                }
+            }
+            
+            print("SEARCH CACHE:  PRELOAD COMPLETE")
+            
+            await MainActor.run {
+                cachedItems = items
+                lastFetchTime = Date()
+            }
+        } catch {
+            print("Failed to preload cache: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Search Logic
-    
-    /// Validates search text and initiates search
+
     private func performSearch() {
-        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard !searchText.trimmingCharacters(in: . whitespacesAndNewlines).isEmpty else {
             searchResults = []
             return
         }
         Task { await executeSearch() }
     }
-    
-    /// Fetches all items and filters by search query
-    /// Searches across item name, ID, and category
+
     private func executeSearch() async {
         isSearching = true
         searchError = nil
         
         do {
-            let allItems = try await supabaseManager.fetchAllItems()
-            let query = searchText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            let allItems:  [InventoryItem]
             
-            let filtered = allItems.filter { item in
-                item.name.lowercased().contains(query) ||
-                item.itemId.lowercased().contains(query) ||
-                item.category.lowercased().contains(query)
+            if isCacheValid && !cachedItems.isEmpty {
+                print("Using cached items with preloaded images")
+                allItems = cachedItems
+            } else {
+                print("Fetching fresh items and preloading images...")
+                var freshItems = try await supabaseManager.fetchAllItems()
+                
+                for index in freshItems.indices {
+                    if freshItems[index].isURLImage {
+                        let image = await ImageCache.shared.fetchImage(for: freshItems[index].imageName)
+                        freshItems[index].cachedUIImage = image
+                    }
+                }
+                
+                allItems = freshItems
+                
+                await MainActor.run {
+                    cachedItems = allItems
+                    lastFetchTime = Date()
+                }
+                
+                print("Cached \(allItems.count) items with images")
             }
             
-            _ = await MainActor.run { searchResults = filtered }
+            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            print("SEARCH DEBUG")
+            print("Search query: '\(query)'")
+            print("Total items in cache: \(allItems.count)")
+            
+            print("All item barcodes:")
+            for item in allItems {
+                print("   - \(item.name): barcode = '\(item.itemId)'")
+            }
+            
+            let filtered = allItems.filter { item in
+                let queryLower = query.lowercased()
+                let barcodeLower = item.itemId.lowercased()
+                let nameLower = item.name.lowercased()
+                let categoryLower = item.category.lowercased()
+                
+                let exactBarcodeMatch = barcodeLower == queryLower
+                let partialBarcodeMatch = barcodeLower.contains(queryLower)
+                let nameMatch = nameLower.contains(queryLower)
+                let categoryMatch = categoryLower.contains(queryLower)
+                
+                let matches = exactBarcodeMatch || partialBarcodeMatch || nameMatch || categoryMatch
+                
+                if matches {
+                    print("MATCH: \(item.name) (barcode: \(item.itemId))")
+                }
+                
+                return matches
+            }
+            
+            print("Found \(filtered.count) matching items")
+            
+            await MainActor.run { searchResults = filtered }
         } catch {
-            _ = await MainActor.run { searchError = error.localizedDescription }
+            print("Search error: \(error.localizedDescription)")
+            await MainActor.run { searchError = error.localizedDescription }
         }
         
         isSearching = false
@@ -291,23 +391,23 @@ struct ItemLookupView: View {
     
     // MARK: - Data Operations
     
-    /// Updates item in database and refreshes search results
     private func updateItem(_ item: InventoryItem) async {
         do {
             try await supabaseManager.updateItem(item)
-            _ = await MainActor.run {
+            await MainActor.run {
                 if let index = searchResults.firstIndex(where: { $0.id == item.id }) {
                     searchResults[index] = item
                 }
+                if let cacheIndex = cachedItems.firstIndex(where: { $0.id == item.id }) {
+                    cachedItems[cacheIndex] = item
+                }
             }
         } catch {
-            print("Error updating item:", error)
-            searchError = "Failed to update item: \(error.localizedDescription)"
+            print("Error updating item: \(error)")
+            searchError = "Failed to update item:  \(error.localizedDescription)"
         }
     }
     
-    /// Toggles bookmark state with optimistic UI update
-    /// Reverts to previous state if database operation fails
     private func toggleBookmark(for item: InventoryItem) {
         guard let index = searchResults.firstIndex(where: { $0.id == item.id }) else { return }
         
@@ -317,6 +417,10 @@ struct ItemLookupView: View {
         let oldState = searchResults[index].isBookmarked
         let newState = !oldState
         searchResults[index].isBookmarked = newState
+        
+        if let cacheIndex = cachedItems.firstIndex(where: { $0.id == item.id }) {
+            cachedItems[cacheIndex].isBookmarked = newState
+        }
         
         if showingDetail, selectedItem?.id == item.id { selectedItem = searchResults[index] }
         
@@ -328,13 +432,15 @@ struct ItemLookupView: View {
                         searchResults[idx].isBookmarked = oldState
                         if showingDetail, selectedItem?.id == item.id { selectedItem = searchResults[idx] }
                     }
+                    if let cacheIdx = cachedItems.firstIndex(where: { $0.id == item.id }) {
+                        cachedItems[cacheIdx].isBookmarked = oldState
+                    }
                 }
             }
             _ = await MainActor.run { bookmarkInFlight.remove(item.id) }
         }
     }
     
-    /// Creates a binding for an item to allow two-way data flow in child views
     private func binding(for item: InventoryItem) -> Binding<InventoryItem> {
         guard let index = searchResults.firstIndex(where: { $0.id == item.id }) else { return .constant(item) }
         return $searchResults[index]
@@ -346,13 +452,14 @@ struct ItemLookupView: View {
 struct ItemLookupView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
-            ItemLookupView(isAuthenticated: .constant(true))
+            ItemLookupView(isAuthenticated: . constant(true))
                 .previewDisplayName("Light")
                 .preferredColorScheme(.light)
             
-            ItemLookupView(isAuthenticated: .constant(true))
+            ItemLookupView(isAuthenticated: . constant(true))
                 .previewDisplayName("Dark")
                 .preferredColorScheme(.dark)
         }
     }
 }
+

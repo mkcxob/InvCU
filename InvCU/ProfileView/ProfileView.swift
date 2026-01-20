@@ -139,12 +139,12 @@ struct ProfileView: View {
         }
         .task {
             await loadUserProfile()
-            await loadBookmarkedItems()
+            await loadBookmarkedItemsWithImages()
             await loadProfileImage()
         }
         .refreshable {
             await loadUserProfile()
-            await loadBookmarkedItems()
+            await loadBookmarkedItemsWithImages()
             await loadProfileImage()
         }
         .onChange(of: selectedPhotoItem) { _, newItem in
@@ -164,7 +164,7 @@ struct ProfileView: View {
                 }
             }
         } message: {
-            Text("Are you sure you want to log out?")
+            Text("Are you sure you want to log out? ")
         }
     }
     
@@ -261,10 +261,10 @@ struct ProfileView: View {
         }
     }
     
-    // MARK: - Load Bookmarked Items
+    // MARK: - Load Bookmarked Items WITH IMAGE PRELOADING
     
-    /// Fetches all items and filters for bookmarked ones
-    private func loadBookmarkedItems() async {
+    /// Fetches bookmarked items and preloads all images
+    private func loadBookmarkedItemsWithImages() async {
         await MainActor.run {
             isLoading = true
         }
@@ -277,9 +277,48 @@ struct ProfileView: View {
         
         do {
             let allItems = try await supabaseManager.fetchAllItems()
+            
+            // Filter for bookmarked items first
+            var bookmarked = allItems.filter { $0.isBookmarked }
+            
+            print("\n===== PROFILE: IMAGE PRELOAD START =====")
+            print("Total bookmarked items: \(bookmarked.count)")
+            
+            let urlImageCount = bookmarked.filter { $0.isURLImage }.count
+            print("Items with URL images:  \(urlImageCount)")
+            
+            // Preload images for all bookmarked items
+            for index in bookmarked.indices {
+                if bookmarked[index].isURLImage {
+                    print("\n[\(index + 1)/\(bookmarked.count)] Preloading: \(bookmarked[index].name)")
+                    print("   URL: \(bookmarked[index].imageName)")
+                    
+                    let startTime = Date()
+                    let image = await ImageCache.shared.fetchImage(for: bookmarked[index].imageName)
+                    let elapsed = Date().timeIntervalSince(startTime)
+                    
+                    bookmarked[index].cachedUIImage = image
+                    
+                    if let img = image {
+                        print("   SUCCESS: Cached \(bookmarked[index].name)")
+                        print("   Image size: \(img.size.width)x\(img.size.height)")
+                        print("   Time: \(String(format:  "%.2f", elapsed))s")
+                    } else {
+                        print("   FAILED: Could not load image for \(bookmarked[index].name)")
+                        print("   Time: \(String(format: "%.2f", elapsed))s")
+                    }
+                } else {
+                    print("\n[\(index + 1)/\(bookmarked.count)] Skipping: \(bookmarked[index].name) (SF Symbol)")
+                }
+            }
+            
+            print("\n===== PROFILE: IMAGE PRELOAD COMPLETE =====")
+            print("Successfully cached:  \(bookmarked.filter { $0.cachedUIImage != nil }.count)/\(urlImageCount)")
+            print("=============================================\n")
+            
             await MainActor.run {
-                bookmarkedItems = allItems.filter { $0.isBookmarked }
-                print("DEBUG: Loaded \(bookmarkedItems.count) bookmarked items")
+                bookmarkedItems = bookmarked
+                print("DEBUG: Loaded \(bookmarkedItems.count) bookmarked items with preloaded images")
             }
         } catch {
             print("ERROR: Failed to load bookmarked items: \(error)")
@@ -310,7 +349,7 @@ struct ProfileView: View {
                 profileImageURL = result.avatar_url
             }
             
-            print("DEBUG: Loaded profile image URL: \(result.avatar_url ?? "none")")
+            print("DEBUG:  Loaded profile image URL: \(result.avatar_url ?? "none")")
         } catch {
             print("ERROR: Failed to load profile image: \(error)")
         }
@@ -351,19 +390,22 @@ struct ProfileView: View {
                 profileImageURL = imageURL
             }
             
-            print("DEBUG: Profile image uploaded successfully: \(imageURL)")
+            print("DEBUG: Profile image uploaded successfully:  \(imageURL)")
         } catch {
-            print("ERROR: Failed to upload profile image: \(error)")
+            print("ERROR:  Failed to upload profile image: \(error)")
         }
     }
     
-    // MARK: - Update Item
+    // MARK:  - Update Item
     
-    /// Updates item in database and refreshes bookmarked list
+    /// Updates item and preserves cached image
     private func updateItem(_ item: InventoryItem) async {
         do {
             try await supabaseManager.updateItem(item)
-            await loadBookmarkedItems()
+            
+            // Reload bookmarked items with images
+            await loadBookmarkedItemsWithImages()
+            
             print("DEBUG: Item updated successfully")
         } catch {
             print("ERROR: Failed to update item: \(error)")
@@ -372,9 +414,12 @@ struct ProfileView: View {
     
     // MARK: - Toggle Bookmark
     
-    /// Toggles bookmark state and refreshes list
+    /// Toggles bookmark and refreshes with image preservation
     private func toggleBookmark(for item: InventoryItem) async {
         guard let index = bookmarkedItems.firstIndex(where: { $0.id == item.id }) else { return }
+        
+        // Preserve the cached image
+        let cachedImage = bookmarkedItems[index].cachedUIImage
         
         await MainActor.run {
             bookmarkedItems[index].isBookmarked.toggle()
@@ -384,11 +429,14 @@ struct ProfileView: View {
             try await supabaseManager.updateItem(bookmarkedItems[index])
             print("DEBUG: Bookmark toggled for \(item.name)")
             
-            await loadBookmarkedItems()
+            // Reload with images
+            await loadBookmarkedItemsWithImages()
         } catch {
             print("ERROR: Failed to toggle bookmark: \(error)")
             await MainActor.run {
                 bookmarkedItems[index].isBookmarked.toggle()
+                // Restore cached image on error
+                bookmarkedItems[index].cachedUIImage = cachedImage
             }
         }
     }
@@ -405,7 +453,7 @@ struct ProfileView: View {
             }
             print("DEBUG: Logged out successfully")
         } catch {
-            print("ERROR: Failed to logout: \(error)")
+            print("ERROR: Failed to logout:  \(error)")
         }
     }
 }
@@ -483,7 +531,7 @@ struct ProfileInfoSection: View {
     }
 }
 
-// MARK: - Bookmarked Item Card
+// MARK:  - Bookmarked Item Card WITH CACHED IMAGE SUPPORT
 struct BookmarkedItemCard: View {
     let item: InventoryItem
     let onTap: () -> Void
@@ -492,23 +540,35 @@ struct BookmarkedItemCard: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 16) {
-                if item.isURLImage, let url = URL(string: item.imageName) {
-                    AsyncImage(url: url) { image in
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    } placeholder: {
-                        ProgressView()
+                // Use cached image if available
+                Group {
+                    if item.isURLImage {
+                        if let cachedImage = item.cachedUIImage {
+                            // Show cached image instantly - NO DELAY
+                            Image(uiImage: cachedImage)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 70, height: 70)
+                                .clipped()
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        } else {
+                            // Fallback placeholder
+                            ZStack {
+                                Color(.systemGray6)
+                                ProgressView()
+                            }
+                            .frame(width: 70, height: 70)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                    } else {
+                        // SF Symbol fallback
+                        Image(systemName: "photo")
+                            .font(.system(size: 28))
+                            .foregroundColor(.gray)
+                            .frame(width: 70, height: 70)
+                            .background(Color(.systemGray6))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
-                    .frame(width: 70, height: 70)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                } else {
-                    Image(systemName: "photo")
-                        .font(.system(size: 28))
-                        .foregroundColor(.gray)
-                        .frame(width: 70, height: 70)
-                        .background(Color(.systemGray6))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {

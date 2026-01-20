@@ -293,7 +293,7 @@ struct InventoryView: View {
     private func toggleBookmark(for item: InventoryItem) {
         print("\n=== BOOKMARK TOGGLE START ===")
         print("Item: \(item.name)")
-        print("Item ID: \(item.id)")
+        print("Barcode: \(item.id)")
         
         guard let index = inventoryItems.firstIndex(where: { $0.id == item.id }) else {
             print("ERROR: Item not found in array")

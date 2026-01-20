@@ -6,78 +6,100 @@
 //
 
 import SwiftUI
-import AVFoundation // For camera input and barcode detection
-import Combine      // For ObservableObject and @Published
+import AVFoundation
+import Combine
 
 // MARK: - Barcode Scanner View
 
 struct BarcodeScannerView: View {
-    @Binding var isPresented: Bool               // Controls if the scanner is shown
-    let onBarcodeScanned: (String) -> Void      // Callback when barcode is scanned
+    @Binding var isPresented: Bool
+    let onBarcodeScanned: (String) -> Void
     
-    @StateObject private var scanner = BarcodeScanner() // Barcode scanner object
+    @StateObject private var scanner = BarcodeScanner()
+    @State private var isProcessing = false
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                CameraPreview(scanner: scanner)  // Shows live camera preview
-                    .ignoresSafeArea()
-                
-                VStack {
+        ZStack {
+            CameraPreview(scanner: scanner)
+                .ignoresSafeArea()
+            
+            VStack {
+                HStack {
                     Spacer()
-                    
-                    // Instructions overlay
-                    VStack(spacing: 12) {
+                    Button(action: {
+                        isPresented = false
+                    }) {
+                        Image(systemName:  "xmark.circle.fill")
+                            .font(.system(size: 32))
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(Color.black.opacity(0.5))
+                            .clipShape(Circle())
+                    }
+                    .padding()
+                }
+                
+                Spacer()
+                
+                VStack(spacing: 12) {
+                    if isProcessing {
+                        ProgressView()
+                            .tint(.white)
+                        Text("Reading barcode...")
+                            .font(. headline)
+                            .foregroundColor(.white)
+                    } else {
                         Text("Scan Barcode")
                             .font(.headline)
                             .foregroundColor(.white)
                         
-                        Text("Position barcode within the frame")
+                        Text("Hold steady and wait for focus")
                             .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.8))
+                            . foregroundColor(.white.opacity(0.8))
                     }
-                    .padding(20)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(16)
-                    .padding(.bottom, 40)
                 }
+                . padding(20)
+                .background(Color.black.opacity(0.7))
+                .cornerRadius(16)
+                .padding(.bottom, 40)
+            }
+            
+            Rectangle()
+                .strokeBorder(isProcessing ? Color.green : Color.white, lineWidth: 3)
+                .frame(width: 280, height: 180)
+                .animation(.easeInOut, value: isProcessing)
+        }
+        .onAppear {
+            scanner.startScanning()
+        }
+        . onDisappear {
+            scanner.stopScanning()
+        }
+        .onChange(of: scanner.scannedCode) { oldValue, newValue in
+            if let code = newValue, !isProcessing {
+                isProcessing = true
                 
-                // Rectangle frame to guide scanning
-                Rectangle()
-                    .strokeBorder(Color.brandNavy, lineWidth: 3)
-                    .frame(width: 250, height: 250)
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") { isPresented = false } // Close scanner
-                        .foregroundColor(.white)
-                }
-            }
-            .onAppear { scanner.startScanning() }   // Start camera when view appears
-            .onDisappear { scanner.stopScanning() } // Stop camera when view disappears
-            .onChange(of: scanner.scannedCode) { oldValue, newValue in
-                if let code = newValue {
-                    onBarcodeScanned(code)           // Call the callback
-                    isPresented = false               // Close scanner
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    print("Final scanned code: \(code)")
+                    onBarcodeScanned(code)
+                    isPresented = false
                 }
             }
         }
     }
 }
 
-// MARK: - Camera Preview (wraps UIKit view in SwiftUI)
+// MARK: - Camera Preview
 
-struct CameraPreview: UIViewRepresentable {
+struct CameraPreview:  UIViewRepresentable {
     let scanner: BarcodeScanner
     
     func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
+        let view = UIView(frame: . zero)
         view.backgroundColor = .black
         
-        // Add live camera preview layer
-        let previewLayer = AVCaptureVideoPreviewLayer(session: scanner.session)
-        previewLayer.videoGravity = .resizeAspectFill
+        let previewLayer = AVCaptureVideoPreviewLayer(session:  scanner.session)
+        previewLayer.videoGravity = . resizeAspectFill
         view.layer.addSublayer(previewLayer)
         
         context.coordinator.previewLayer = previewLayer
@@ -85,8 +107,7 @@ struct CameraPreview: UIViewRepresentable {
         return view
     }
     
-    func updateUIView(_ uiView: UIView, context: Context) {
-        // Make sure preview layer always matches view bounds
+    func updateUIView(_ uiView: UIView, context:  Context) {
         if let previewLayer = context.coordinator.previewLayer {
             DispatchQueue.main.async {
                 previewLayer.frame = uiView.bounds
@@ -95,59 +116,121 @@ struct CameraPreview: UIViewRepresentable {
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator() // Needed to store the previewLayer
+        Coordinator()
     }
     
     class Coordinator {
-        var previewLayer: AVCaptureVideoPreviewLayer? // Store preview layer reference
+        var previewLayer: AVCaptureVideoPreviewLayer?
     }
 }
 
-// MARK: - Barcode Scanner Class
+// MARK:  - Barcode Scanner Class
 
-class BarcodeScanner: NSObject, ObservableObject, AVCaptureMetadataOutputObjectsDelegate {
-    @Published var scannedCode: String? // Stores scanned barcode, auto-updates SwiftUI views
+class BarcodeScanner:  NSObject, ObservableObject, AVCaptureMetadataOutputObjectsDelegate {
+    @Published var scannedCode: String?
     
-    let session = AVCaptureSession()          // Camera session
-    private let output = AVCaptureMetadataOutput() // Metadata output (barcode data)
+    let session = AVCaptureSession()
+    private let output = AVCaptureMetadataOutput()
+    private var captureDevice: AVCaptureDevice?
+    
+    private var lastScannedCode: String?
+    private var scanCount:  [String: Int] = [:]
+    private let requiredScans = 3
     
     override init() {
         super.init()
-        setupSession() // Configure camera session
+        setupSession()
     }
     
     private func setupSession() {
-        // Get default camera
-        guard let device = AVCaptureDevice.default(for: .video),
-              let input = try? AVCaptureDeviceInput(device: device) else { return }
+        session.sessionPreset = .high
         
-        if session.canAddInput(input) { session.addInput(input) }   // Add camera input
-        if session.canAddOutput(output) {
-            session.addOutput(output)                                // Add output
-            output.setMetadataObjectsDelegate(self, queue: .main)    // Set delegate to detect barcodes
-            output.metadataObjectTypes = [.ean8, .ean13, .qr, .code128, .code39] // Supported types
+        guard let device = AVCaptureDevice.default(for: .video) else {
+            print("Failed to get camera device")
+            return
+        }
+        
+        captureDevice = device
+        
+        do {
+            let input = try AVCaptureDeviceInput(device: device)
+            
+            if session.canAddInput(input) {
+                session.addInput(input)
+            }
+            
+            if session.canAddOutput(output) {
+                session.addOutput(output)
+                output.setMetadataObjectsDelegate(self, queue: . main)
+                output.metadataObjectTypes = [
+                    . ean8,
+                    .ean13,
+                    .qr,
+                    .code128,
+                    .code39,
+                    .code93,
+                    .upce
+                ]
+            }
+            
+            try device.lockForConfiguration()
+            
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+            }
+            
+            if device.isAutoFocusRangeRestrictionSupported {
+                device.autoFocusRangeRestriction = .near
+            }
+            
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+            
+            device.unlockForConfiguration()
+            
+            print("Camera setup complete with autofocus enabled")
+            
+        } catch {
+            print("Failed to setup camera: \(error.localizedDescription)")
         }
     }
     
     func startScanning() {
+        scanCount.removeAll()
+        lastScannedCode = nil
+        scannedCode = nil
+        
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.session.startRunning() // Start camera
+            self?.session.startRunning()
         }
     }
     
     func stopScanning() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.session.stopRunning() // Stop camera
+            self?.session.stopRunning()
         }
     }
     
-    // Called automatically when camera detects barcode
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        
+        guard scannedCode == nil else { return }
+        
         if let metadataObject = metadataObjects.first,
            let readableObject = metadataObject as? AVMetadataMachineReadableCodeObject,
            let stringValue = readableObject.stringValue {
-            scannedCode = stringValue // Save scanned code
-            stopScanning()            // Stop after first scan
+            
+            scanCount[stringValue, default: 0] += 1
+            
+            print("Scan attempt: \(stringValue) - Count: \(scanCount[stringValue] ?? 0)")
+            
+            if scanCount[stringValue] ??  0 >= requiredScans {
+                AudioServicesPlaySystemSound(SystemSoundID(kSystemSoundID_Vibrate))
+                
+                print("Confirmed barcode after \(requiredScans) scans: \(stringValue)")
+                scannedCode = stringValue
+                stopScanning()
+            }
         }
     }
 }
@@ -157,7 +240,7 @@ class BarcodeScanner: NSObject, ObservableObject, AVCaptureMetadataOutputObjects
 struct BarcodeScannerView_Previews: PreviewProvider {
     static var previews: some View {
         BarcodeScannerView(isPresented: .constant(true)) { code in
-            print("Scanned: \(code)") // Preview callback
+            print("Scanned:  \(code)")
         }
     }
 }

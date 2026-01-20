@@ -58,7 +58,7 @@ struct InventoryCard: View {
                 
                 Text("Quantity: \(item.quantity) pc")
                     . font(.system(size: 15))
-                    .foregroundColor(item.quantity < 50 ? Color(UIColor.systemRed) : Color(UIColor.secondaryLabel))
+                    .foregroundColor(item.quantity < 10 ? Color(UIColor.systemRed) : Color(UIColor.secondaryLabel))
             }
             .frame(maxWidth: . infinity, alignment: .leading)
             .contentShape(Rectangle())

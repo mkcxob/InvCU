@@ -44,7 +44,7 @@ struct AddItemView: View {
                     TextField("Item Name", text: $itemName)
                         .autocapitalization(.words)
                     
-                    TextField("Item ID", text: $itemId)
+                    TextField("Barcode", text: $itemId)
                         .autocapitalization(.allCharacters)
                     
                     TextField("Quantity", text: $quantity)
